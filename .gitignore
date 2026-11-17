@@ -1,0 +1,9 @@
+# Task records, test evidence and scratch space stay local.
+runs/
+evidence/
+.scratch/
+__pycache__/
+*.pyc
+.DS_Store
+# Written by install.sh: the Python Herdworks runs on.
+/.python

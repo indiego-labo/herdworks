@@ -1,0 +1,11 @@
+diff --git a/hello.py b/hello.py
+--- a/hello.py
++++ b/hello.py
+@@ -4,6 +4,7 @@ import argparse
+ def main():
+     parser = argparse.ArgumentParser()
+     parser.add_argument("name")
++    parser.add_argument("--shout", action="store_true")
+     args = parser.parse_args()
+     print(f"Hello, {args.name}!")
+ if __name__ == "__main__":

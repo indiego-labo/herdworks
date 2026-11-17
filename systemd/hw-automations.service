@@ -1,0 +1,7 @@
+[Unit]
+Description=Herdworks automations tick
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/herdworks/automations.env
+ExecStart=/bin/sh -c 'exec "$$HW_CHECKOUT/bin/hw" automations tick'

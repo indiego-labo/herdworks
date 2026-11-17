@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Herdworks automations each minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Unit=hw-automations.service
+
+[Install]
+WantedBy=timers.target

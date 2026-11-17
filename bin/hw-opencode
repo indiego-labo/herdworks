@@ -1,0 +1,55 @@
+#!/bin/sh
+# Runs as sh first: start the Python recorded by install.sh, else python3, on this same file.
+''':'
+here=$(cd "$(dirname "$0")/.." && pwd)
+python=$(cat "$here/.python" 2>/dev/null || true)
+exec "${python:-python3}" "$0" "$@"
+'''
+import json
+import os
+from pathlib import Path
+import sys
+import shutil
+import shlex
+
+if len(sys.argv) != 2 or sys.argv[1] not in ('coordinator', 'worker', 'verify', 'evidence'):
+    raise SystemExit('usage: hw-opencode coordinator|worker|verify|evidence')
+mode = sys.argv[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from herdworks.limits import launcher_settings
+settings = launcher_settings(Path.cwd(), {'worker': 'build', 'verify': 'verify', 'evidence': 'evidence'}.get(mode, mode))
+if settings:
+    project = Path.cwd().parent if mode == 'coordinator' else Path.cwd().parents[3]
+    os.environ['HW_HOME'] = str(project.parents[1])
+if not settings or settings['agent'] != 'opencode':
+    raise SystemExit('opencode requires an authorized Project agent choice')
+allowed = {'HOME', 'PATH', 'USER', 'LOGNAME', 'LANG', 'LANGUAGE', 'TERM', 'COLORTERM',
+           'SHELL', 'TZ', 'SSH_AUTH_SOCK', 'HW_HOME', 'SSL_CERT_FILE', 'SSL_CERT_DIR'}
+environment = {name: value for name, value in os.environ.items()
+               if name in allowed or name.startswith(('XDG_', 'HC_', 'LC_'))}
+os.environ.clear()
+os.environ.update(environment)
+folder = Path.cwd() if mode == 'coordinator' else Path.cwd().parent
+private_bin = folder / '.tools'
+private_bin.mkdir(exist_ok=True)
+core_environment = {name: value for name, value in os.environ.items() if name.startswith('XDG_')}
+real_hc = shutil.which('hc')
+wrapper = private_bin / 'hc'
+wrapper.write_text('#!/bin/sh\nexec ' + shlex.join(['env', *[f'{name}={value}' for name, value in core_environment.items()], real_hc]) + ' "$@"\n')
+wrapper.chmod(0o755)
+os.environ['PATH'] = str(private_bin) + os.pathsep + os.environ['PATH']
+# Restore the core paths for Herdworks tools; provider paths belong to this process.
+os.environ['HW_HC_HOP'] = '1'
+
+os.environ['XDG_CONFIG_HOME'] = str(Path.home() / '.config')
+os.environ['XDG_DATA_HOME'] = str(Path.home() / '.local/share')
+os.environ['XDG_STATE_HOME'] = str(Path.home() / '.local/state')
+folder = Path.cwd() if mode == 'coordinator' else Path.cwd().parent
+configuration = folder / '.opencode-config.json'
+configuration.write_text(json.dumps({'model': settings['model'], 'websearch': False}) + '\n')
+os.environ['OPENCODE_CONFIG'] = str(configuration)
+os.environ['OPENCODE_CONFIG_CONTENT'] = configuration.read_text()
+executable = shutil.which('opencode') or str(Path.home() / '.opencode/bin/opencode')
+if not os.access(executable, os.X_OK):
+    raise SystemExit('opencode is unavailable: add it to PATH or install it at ~/.opencode/bin/opencode')
+os.execv(executable, [executable, '--standalone', '--auto'])

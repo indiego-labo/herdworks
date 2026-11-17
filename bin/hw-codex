@@ -1,0 +1,65 @@
+#!/bin/sh
+# Runs as sh first: start the Python recorded by install.sh, else python3, on this same file.
+''':'
+here=$(cd "$(dirname "$0")/.." && pwd)
+python=$(cat "$here/.python" 2>/dev/null || true)
+exec "${python:-python3}" "$0" "$@"
+'''
+import json
+import os
+from pathlib import Path
+import sys
+
+if len(sys.argv) < 2 or sys.argv[1] not in ("coordinator", "worker", "verify"):
+    raise SystemExit("usage: hw-codex coordinator|worker|verify [codex arguments]")
+mode = sys.argv[1]
+allowed = {"HOME", "PATH", "USER", "LOGNAME", "LANG", "LANGUAGE", "TERM", "COLORTERM",
+           "SHELL", "TMPDIR", "TZ", "SSH_AUTH_SOCK", "HW_HOME", "CODEX_HOME",
+           "SSL_CERT_FILE", "SSL_CERT_DIR"}
+environment = {name: value for name, value in os.environ.items()
+               if name in allowed or name.startswith(("XDG_", "HC_", "LC_"))}
+os.environ.clear()
+os.environ.update(environment)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from herdworks.runs import git
+from herdworks.limits import launcher_settings, config
+settings = launcher_settings(Path.cwd(), {"worker": "build", "verify": "evidence" if Path.cwd().name == "work" else "verify"}.get(mode, mode))
+if settings:
+    project = Path.cwd().parent if mode == 'coordinator' else Path.cwd().parents[3]
+    os.environ['HW_HOME'] = str(project.parents[1])
+try:
+    common = git(Path.cwd(), "rev-parse", "--path-format=absolute", "--git-common-dir")
+    root = str(Path(common).parent)
+except RuntimeError:
+    root = common = str(Path.cwd())
+args = ["codex", "--no-daemon", "-c", "check_for_update_on_startup=false",
+        "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+        "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+        "-c", f"projects={{{json.dumps(root)}={{trust_level=\"trusted\"}}}}"]
+temporary = (Path.cwd() if mode == "coordinator" else Path.cwd().parent) / ".tmp"
+temporary.mkdir(exist_ok=True)
+os.environ["TMPDIR"] = str(temporary)
+os.environ["TMPPREFIX"] = str(temporary / "zsh")
+sandbox = config()["sandbox"]
+if sandbox == "off":
+    args += ["--dangerously-bypass-approvals-and-sandbox"]
+    if mode == "coordinator":
+        os.environ["HW_HC_HOP"] = "1"
+elif mode == "worker":
+    args += ["--approve-for-me", "--add-dir", str(Path.cwd().parent)]
+    if sys.platform.startswith("linux"):
+        args += ["--add-dir", common]
+    if settings:
+        args += ["--add-dir", str(Path.cwd().parents[3] / 'memory')]
+elif mode == "verify":
+    args += ["-s", "workspace-write", "-a", "never", "-c", "sandbox_workspace_write.network_access=true",
+             "--add-dir", str(Path.cwd().parent)]
+else:
+    os.environ["HW_HC_HOP"] = "1"
+    args += ["-s", "workspace-write", "-a", "never", "-c", "sandbox_workspace_write.network_access=true",
+             "--add-dir", str(Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "herdr-core")]
+    if os.environ.get("XDG_RUNTIME_DIR"):
+        args += ["--add-dir", str(Path(os.environ["XDG_RUNTIME_DIR"]) / "herdr-core")]
+if settings:
+    args += ["-m", (settings["model"] or ("gpt-6-luna" if Path.cwd().name == "work" else "gpt-6.1-sol")), "-c", "model_reasoning_effort=" + ("medium" if mode == "coordinator" or mode == "verify" and Path.cwd().name != "work" else "max" if Path.cwd().name == "work" else "low")]
+os.execvp("codex", args + sys.argv[2:])

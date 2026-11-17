@@ -1,0 +1,18 @@
+#!/bin/sh
+# Runs as sh first: start the Python recorded by install.sh, else python3, on this same file.
+''':'
+here=$(cd "$(dirname "$0")/.." && pwd)
+python=$(cat "$here/.python" 2>/dev/null || true)
+exec "${python:-python3}" "$0" "$@"
+'''
+import os
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from herdworks import hc
+from herdworks.cli import main
+
+if os.environ.get("HW_HC_HOP"):
+    raise SystemExit(hc.forward(Path(__file__).resolve(), sys.argv[1:]))
+raise SystemExit(main())
