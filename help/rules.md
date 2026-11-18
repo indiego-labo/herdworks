@@ -24,11 +24,16 @@ see, its folder and the agents that search it, and reports machine house-rule li
 skill which is not installed: that works without `--project`. `hw skills --project PROJECT`
 also searches the repository's `.agents/skills` and the Project's own rules.
 
-A rule line names a skill when it mentions skills and puts the name in backticks (`my-skill`),
-when it puts a plain name after use, load or follow ("Use the release-notes skill."), or when it
-names a folder under `skills/` (`.agents/skills/my-skill`). File names such as `SKILL.md` or
-`index.md` are not skill names. Only the rule files in effect are searched, so a Project's copy
-replaces the machine's for that rule.
+A rule line names a skill in one of these ways:
+
+- it mentions skills and puts the name in backticks (`my-skill`);
+- it names a folder under `skills/` (`.agents/skills/my-skill`);
+- it puts a plain name after use, load or follow. A hyphenated name counts on its own ("Use
+  release-notes for every release."); a single word counts when "skill" follows it ("Use the
+  review skill.").
+
+File names such as `SKILL.md` or `index.md` are not skill names. Only the rule files in effect
+are searched, so a Project's copy replaces the machine's for that rule.
 
 Give a worker a skill in one of four ways:
 

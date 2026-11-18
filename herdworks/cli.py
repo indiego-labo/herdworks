@@ -100,7 +100,7 @@ def main(argv=None):
     command.add_argument("--project", help="a Project's own rules instead of this machine's")
     command = sub.add_parser("skills",
                              help="skills workers can load, and house rules that name a missing one")
-    command.add_argument("--project", help="also search this Project's repository for skills")
+    command.add_argument("--project", help="also search this Project's repository and its rules for skills")
     command = sub.add_parser("setup", help="sign in and add a first Project; safe to run again")
     command.add_argument("--check", action="store_true", help="only report what is missing")
     command = sub.add_parser('status')

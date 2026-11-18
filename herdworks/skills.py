@@ -27,9 +27,13 @@ UNDER_SKILLS = re.compile(r"(?:^|/)skills/([^/]+)")
 
 # A skill folder is named in lowercase with single hyphens, as in .agents/skills/verify-herdworks.
 SKILL_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
-# Plain text names a skill after use, load or follow: "Use the release-notes skill."
+# Plain text names a skill after use, load or follow: "Use the release-notes skill." A single
+# lowercase word is ordinary prose too ("Use them rather than ..."), so it counts only when the
+# word "skill" follows it; a hyphenated slug is a skill name on its own.
 PLAIN_NAME = re.compile(r"(?i:\b(?:use|load|follow)\s+)(?:the\s+)?(" + SKILL_NAME.pattern
                         + r")\s+skill\b")
+PLAIN_SLUG = re.compile(r"(?i:\b(?:use|load|follow)\s+)(?:the\s+)?([a-z0-9]+(?:-[a-z0-9]+)+)"
+                        r"(?![A-Za-z0-9._/-])")
 # A documented file is not a skill: SKILL.md, index.md, README.
 FILE_TYPE = re.compile(r"\.[A-Za-z0-9]+$")
 DOCUMENTS = frozenset({"readme", "license", "licence", "changelog", "contributing", "notice",
@@ -88,7 +92,7 @@ def named(line):
             continue
         if not is_file_name(name) and "*" not in name and "?" not in name:
             names.append(name)
-    for name in PLAIN_NAME.findall(line):
+    for name in PLAIN_NAME.findall(line) + PLAIN_SLUG.findall(line):
         if SKILL_NAME.fullmatch(name) and name not in names:
             names.append(name)
     return names

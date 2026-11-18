@@ -94,15 +94,30 @@ class SkillsTests(RunCase):
         machine = self.home / 'rules'
         machine.mkdir(parents=True)
         (machine / 'build.md').write_text(
+            'Use release-notes for every release.\n'
+            'Load audit-log before tagging.\n'
+            'Follow changelog-writer when reviewing.\n'
             'Use the release-notes skill for every release.\n'
-            'Load the changelog-writer skill before tagging.\n'
-            'Follow the audit-log skill when reviewing.\n'
+            'Use the review skill when it is installed.\n'
             'Release notes live in a skill folder.\n'
-            'The release-notes skill exists.\n')
+            'The release-notes skill exists.\n'
+            'Use them rather than inventing your own.\n'
+            'Follow that message to its task.\n')
 
         found = skills.missing(self.project)
         self.assertEqual([(item['name'], item['line']) for item in found],
-                         [('release-notes', 1), ('changelog-writer', 2), ('audit-log', 3)])
+                         [('release-notes', 1), ('audit-log', 2), ('changelog-writer', 3),
+                          ('release-notes', 4), ('review', 5)])
+
+    def test_plain_name_needs_a_slug_the_skill_word_or_a_verb(self):
+        for line, expected in (
+                ('Use release-notes for every release.', ['release-notes']),
+                ('Load audit-log before tagging.', ['audit-log']),
+                ('Follow docs/skills/index.md before tagging.', []),
+                ('Follow the release-notes skill.', ['release-notes']),
+                ('Read release-notes for every release.', []),
+                ('Use them rather than inventing your own.', [])):
+            self.assertEqual(skills.named(line), expected, line)
 
     def test_overridden_machine_rule_is_not_scanned(self):
         machine = self.home / 'rules'
@@ -121,7 +136,7 @@ class SkillsTests(RunCase):
         page = help_text('rules')
         self.assertIn('reports machine house-rule lines that name a', page)
         self.assertIn('works without `--project`', page)
-        self.assertIn('Only the rule files in effect are searched', page)
+        self.assertIn('Only the rule files in effect are searched', ' '.join(page.split()))
         self.assertIn('File names such as `SKILL.md`', page)
         readme = (ROOT / 'README.md').read_text()
         self.assertIn('machine house-rule lines that name a skill which is not installed', readme)
@@ -136,6 +151,12 @@ class SkillsTests(RunCase):
         self.assertEqual(skills.missing(self.project), [])
         self.assertIn('(no house rule names a missing skill)',
                       '\n'.join(skills.listing(self.project)))
+
+    def test_skills_help_says_the_project_also_scans_its_rules(self):
+        buffer = StringIO()
+        with redirect_stdout(buffer), self.assertRaises(SystemExit):
+            cli.main(['skills', '--help'])
+        self.assertIn("repository and its rules", buffer.getvalue())
 
     def test_skills_command_prints_the_same_report(self):
         self.install('tmp-skill', self.user / '.agents/skills')
