@@ -77,6 +77,71 @@ class SkillsTests(RunCase):
         self.assertIn('never-installed', missing_section)
         self.assertNotIn('tmp-skill', missing_section)
 
+    def test_file_names_are_not_skills_but_a_slug_on_the_line_is(self):
+        machine = self.home / 'rules'
+        machine.mkdir(parents=True)
+        (machine / 'build.md').write_text(
+            'Create a `SKILL.md` in each skill folder.\n'
+            'Follow `docs/skills/index.md`.\n'
+            'Read the `README` when a skill folder is new.\n'
+            'Use the `tmp-proof-skill` skill and put a `SKILL.md` in it.\n')
+
+        found = skills.missing(self.project)
+        self.assertEqual([(item['name'], item['line']) for item in found],
+                         [('tmp-proof-skill', 4)])
+
+    def test_plain_skill_name_after_use_load_or_follow_is_reported(self):
+        machine = self.home / 'rules'
+        machine.mkdir(parents=True)
+        (machine / 'build.md').write_text(
+            'Use release-notes for every release.\n'
+            'Load audit-log before tagging.\n'
+            'Follow changelog-writer when reviewing.\n'
+            'Use the release-notes skill for every release.\n'
+            'Use the review skill when it is installed.\n'
+            'Release notes live in a skill folder.\n'
+            'The release-notes skill exists.\n'
+            'Use them rather than inventing your own.\n'
+            'Follow that message to its task.\n')
+
+        found = skills.missing(self.project)
+        self.assertEqual([(item['name'], item['line']) for item in found],
+                         [('release-notes', 1), ('audit-log', 2), ('changelog-writer', 3),
+                          ('release-notes', 4), ('review', 5)])
+
+    def test_plain_name_needs_a_slug_the_skill_word_or_a_verb(self):
+        for line, expected in (
+                ('Use release-notes for every release.', ['release-notes']),
+                ('Load audit-log before tagging.', ['audit-log']),
+                ('Follow docs/skills/index.md before tagging.', []),
+                ('Follow the release-notes skill.', ['release-notes']),
+                ('Read release-notes for every release.', []),
+                ('Use them rather than inventing your own.', [])):
+            self.assertEqual(skills.named(line), expected, line)
+
+    def test_overridden_machine_rule_is_not_scanned(self):
+        machine = self.home / 'rules'
+        machine.mkdir(parents=True)
+        (machine / 'build.md').write_text('Follow the `ghost-skill` skill.\n')
+        project_rules = self.project / 'rules'
+        project_rules.mkdir()
+        (project_rules / 'build.md').write_text('Follow the `real-skill` skill.\n')
+
+        self.assertEqual([(item['where'], item['name']) for item in skills.missing(self.project)],
+                         [('Project', 'real-skill')])
+        self.assertEqual([(item['where'], item['name']) for item in skills.missing()],
+                         [('machine', 'ghost-skill')])
+
+    def test_help_and_readme_say_machine_rules_need_no_project(self):
+        page = help_text('rules')
+        self.assertIn('reports machine house-rule lines that name a', page)
+        self.assertIn('works without `--project`', page)
+        self.assertIn('Only the rule files in effect are searched', ' '.join(page.split()))
+        self.assertIn('File names such as `SKILL.md`', page)
+        readme = (ROOT / 'README.md').read_text()
+        self.assertIn('machine house-rule lines that name a skill which is not installed', readme)
+        self.assertIn('needing `--project`', readme)
+
     def test_glob_and_plain_folder_are_not_mistaken_for_skills(self):
         machine = self.home / 'rules'
         machine.mkdir(parents=True)
@@ -86,6 +151,12 @@ class SkillsTests(RunCase):
         self.assertEqual(skills.missing(self.project), [])
         self.assertIn('(no house rule names a missing skill)',
                       '\n'.join(skills.listing(self.project)))
+
+    def test_skills_help_says_the_project_also_scans_its_rules(self):
+        buffer = StringIO()
+        with redirect_stdout(buffer), self.assertRaises(SystemExit):
+            cli.main(['skills', '--help'])
+        self.assertIn("repository and its rules", buffer.getvalue())
 
     def test_skills_command_prints_the_same_report(self):
         self.install('tmp-skill', self.user / '.agents/skills')
