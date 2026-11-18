@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .home import hw_home
 from .limits import ROLES, config
-from .projects import add_project, grant_project, project_path
+from .projects import add_github_project, project_path, read_project, repository_slug
 
 PREFERRED_MODELS = ('deepseek/deepseek-flash', 'opencode/deepseek-v4.1-flash-free', 'opencode/big-pickle')
 
@@ -204,34 +204,21 @@ def check_project(fix):
     if not repository:
         todo('skipped; run hw setup again to add one')
         return None
-    repository = re.sub(r'^(https://github\.com/|git@github\.com:)', '', repository).removesuffix('.git').strip('/')
-    if not re.fullmatch(r'[\w.-]+/[\w.-]+', repository):
+    try:
+        slug = repository_slug(repository)
+    except ValueError:
         todo(f'{repository} is not owner/name')
         return None
-    info = run('gh', 'repo', 'view', repository, '--json', 'defaultBranchRef')
-    if info.returncode:
-        todo(f'GitHub cannot find {repository} with your sign-in: ' + info.stderr.strip())
-        return None
-    base = json.loads(info.stdout)['defaultBranchRef']['name']
-    name = project_name(repository)
-    folder = Path(ask('Where to keep its code', str(Path.home() / 'code' / repository.split('/')[-1]))).expanduser()
-    if not folder.exists():
-        folder.parent.mkdir(parents=True, exist_ok=True)
-        # HTTPS with gh's sign-in works on every machine; gh's own clone follows its git_protocol
-        # setting, which may be SSH without a key.
-        cloned = run('git', '-c', 'credential.helper=', '-c', f"credential.helper=!{tool('gh')} auth git-credential",
-                     'clone', '--quiet', f'https://github.com/{repository}.git', str(folder))
-        if cloned.returncode:
-            todo('clone failed: ' + cloned.stderr.strip())
-            return None
-        done(f'cloned to {folder}')
-    else:
-        done(f'using {folder}')
+    name = project_name(slug)
     if project_path(name).exists():
         name = ask('A Project with that name exists; another name (12 letters at most)')
-    add_project(name, folder, base)
-    grant_project(project_path(name), push=True, draft_pr=True, unsandboxed=True)
-    done(f'Project {name}: tasks branch from {base} and end as draft pull requests on {repository}')
+    try:
+        project = add_github_project(name, slug)
+    except (OSError, ValueError, RuntimeError) as error:
+        todo(str(error))
+        return None
+    done(f'Project {name}: tasks branch from {read_project(project)["base_branch"]} '
+         f'and end as draft pull requests on {slug}')
     return name
 
 

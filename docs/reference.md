@@ -7,7 +7,8 @@ Project for a clean repository, then send it a task:
 
 ```sh
 hw install
-hw project add hello --repo /absolute/hello --base main --prefix HE
+hw project add hello --github owner/hello
+hw project add local --repo /absolute/hello --base main --prefix HE
 hw up hello
 hw say hello --file /absolute/shout.md
 hw read hello --since 0
@@ -15,7 +16,19 @@ hw tasks hello
 ```
 
 `HW_HOME` selects the data directory; the default is `~/.herdworks`. A Project keeps
-`project.json`, `memory/`, `tasks/`, `inbox.jsonl` and `coordinator/` there. Project names
+`project.json`, `memory/`, `tasks/`, `inbox.jsonl` and `coordinator/` there.
+
+`hw project add NAME --github owner/repo` works for any repository the signed-in `gh`
+account may push to, with no allowlist and no hand-cloning. It asks GitHub for the default
+branch, checks the account may push, then clones over HTTPS with `gh`'s sign-in into
+`HW_HOME/repos/owner/repo`. A repository it cannot push to is refused before anything is
+cloned, and a failed add leaves no Project behind. The add turns on the usual grants: push,
+draft pull requests and unsandboxed sessions. `--base BRANCH` picks another base branch.
+`--repo PATH` adds a checkout you already have and clones nothing.
+
+Every new task fetches the Project's remote first and starts from the newest remote copy of
+its base branch, so a task made after someone pushes to GitHub includes that push. A task
+that names no base uses the Project's base branch. Project names
 are at most 12 lowercase letters, digits, hyphens or underscores. Task prefixes are
 two uppercase letters, defaulting to the first two letters in the Project name (padded with X if needed).
 Tasks receive rising ids such as `HE-1` and a branch `hw/HE-1` from the Project's
@@ -26,6 +39,8 @@ a second live coordinator. `say` also brings a missing coordinator up. Messages 
 recorded unchanged with rising numbers before delivery; `say hello --number 1` retries
 that exact message after a delivery error. Repeated numbers reuse their task and receive
 a repeat acknowledgement. A blocked coordinator is reported without forced input.
+`say hello --base feature/x "..."` records `feature/x` with that message: the task starts
+from the newest remote `feature/x` and its draft pull request opens against that branch.
 
 Replies are numbered `.md` files under `coordinator/outbox/`, beginning `REPLY`, `QUESTION`
 or `DONE`. `read --since N` returns only reply numbers greater than N. The coordinator

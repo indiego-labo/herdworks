@@ -359,6 +359,15 @@ class PRTests(GateCase):
         args = json.loads(self.log.read_text())['args']
         self.assertEqual(args[args.index('--title') + 1], sentence[:72].rstrip())
 
+    def test_draft_opens_against_the_tasks_base_branch(self):
+        data = json.loads((self.path / 'task.json').read_text())
+        data['base_branch'] = 'feature/x'
+        (self.path / 'task.json').write_text(json.dumps(data))
+        open_pr(self.path)
+        call = json.loads(self.log.read_text())
+        self.assertEqual(call['args'][call['args'].index('--base') + 1], 'feature/x')
+        self.assertIn('based on feature/x at ' + data['base'], call['body'])
+
     def test_coordinator_can_pass_an_explicit_title(self):
         output = io.StringIO()
         with redirect_stdout(output):

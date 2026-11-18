@@ -9,7 +9,7 @@ from . import hc
 from .gate import check_gate, gate, reap
 from .probe import format_fact, probe
 from .runs import ROOT, derive_status, locked, read_task, first_line, events
-from .projects import add_project, project_path, task_path, task_paths, new_task, read_project
+from .projects import add_project, add_github_project, project_path, task_path, task_paths, new_task, read_project
 from .talk import up, say, read, latest, wait
 from .spawn import spawn
 from .pickup import stop, close, tidy
@@ -137,8 +137,10 @@ def main(argv=None):
     actions = command.add_subparsers(dest="action", required=True)
     command = actions.add_parser("add")
     command.add_argument("project")
-    command.add_argument("--repo", type=Path, required=True)
-    command.add_argument("--base", default="main")
+    source = command.add_mutually_exclusive_group(required=True)
+    source.add_argument("--repo", type=Path, help="a clean local checkout")
+    source.add_argument("--github", help="owner/repo; clones it under HW_HOME with gh's sign-in")
+    command.add_argument("--base", default=None, help="base branch (default: main, or GitHub's default)")
     command.add_argument("--prefix")
     command = actions.add_parser("grant")
     command.add_argument("project")
@@ -154,6 +156,7 @@ def main(argv=None):
     command.add_argument("text", nargs="?")
     command.add_argument("--file", type=Path)
     command.add_argument("--number", type=int, help="redeliver an existing message number")
+    command.add_argument("--base", help="start this task from another branch instead of the Project base")
     command = sub.add_parser("read")
     command.add_argument("project")
     command.add_argument("--since", type=int, default=0)
@@ -175,6 +178,7 @@ def main(argv=None):
     source.add_argument("--message", type=int)
     command.add_argument("--role", nargs=2, action="append", default=[])
     command.add_argument("--stuck-after", type=float)
+    command.add_argument("--base", help="branch to start from instead of the Project base")
     command = actions.add_parser("close")
     command.add_argument("project")
     command.add_argument("task_id")
@@ -257,7 +261,10 @@ def main(argv=None):
             print(json.dumps(config(), indent=2))
         elif args.command == "project":
             if args.action == "add":
-                path = add_project(args.project, args.repo, args.base, args.prefix)
+                if args.github:
+                    path = add_github_project(args.project, args.github, args.base, args.prefix)
+                else:
+                    path = add_project(args.project, args.repo, args.base or "main", args.prefix)
                 print(f"added Project {path.name}")
             else:
                 print(json.dumps(grant_project(project_path(args.project), args.push,
@@ -269,7 +276,7 @@ def main(argv=None):
             if args.file and args.text is not None:
                 raise ValueError("use text or --file")
             text = args.file.read_text() if args.file else args.text
-            number, repeat = say(project_path(args.project), text, args.number)
+            number, repeat = say(project_path(args.project), text, args.number, base=args.base)
             print(f"delivered {number}" + (" repeat" if repeat else ""))
         elif args.command == "read":
             if args.latest:
@@ -294,7 +301,7 @@ def main(argv=None):
             print(f"closed {args.task_id}: removed {len(removed)} worktrees")
         elif args.command == "task":
             path, repeat = new_task(project_path(args.project), args.brief, args.message,
-                                    dict(args.role), args.stuck_after)
+                                    dict(args.role), args.stuck_after, args.base)
             reason = hold_reason(path, allocating=True)
             print(f"{path.name}" + (" repeat" if repeat else "") + (f" queued: {reason}" if reason else ""))
         else:

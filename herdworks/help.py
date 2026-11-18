@@ -1,4 +1,5 @@
 """`hw help`: the same guides for people and for agents, printed as Markdown."""
+import json
 from .home import hw_home
 from .runs import ROOT
 
@@ -20,6 +21,17 @@ def strip_front_matter(text):
     return text
 
 
+def chosen_agents():
+    """True when config.json names agents; a file with other settings alone has no chosen model."""
+    path = hw_home() / 'config.json'
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False
+    agents = data.get('agents') if isinstance(data, dict) else None
+    return isinstance(agents, dict) and bool(agents)
+
+
 def next_step():
     """One line on what to do next on this machine, read from files only."""
     home = hw_home()
@@ -27,7 +39,7 @@ def next_step():
     if projects:
         return (f'Your Projects: {", ".join(projects)}. '
                 f'Give one a task with `hw say {projects[0]} "..."`.')
-    if not (home / 'config.json').is_file():
+    if not chosen_agents():
         return 'Next: run `hw setup` to choose a model and add your first Project.'
     return 'Next: run `hw setup` to add your first Project.'
 

@@ -19,7 +19,9 @@ with hw say), DONE (finished, with the pull request) or PROBLEM (needs the owner
 
     hw setup                  sign in, pick a model, add a Project; safe to run again
     hw setup --check          only report what is missing
-    hw project add NAME --repo PATH --base main   add another Project by hand
+    hw project add NAME --github owner/repo       add a Project from GitHub; hw clones it
+    hw project add NAME --repo PATH --base main   add a checkout you already have
+    hw say NAME --base BRANCH "what you want"     start that task from another branch
     hw rules                  the house rules workers follow
 
 ## More help
