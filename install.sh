@@ -140,6 +140,7 @@ main() {
         printf '  Run:  hw setup\n\n'
     fi
     printf 'hw setup signs you in to GitHub and a model provider, then adds your first Project.\n'
+    printf 'hw help explains everything else.\n'
 }
 
 step() { printf '\n\033[1m%s\033[0m\n' "$1"; }

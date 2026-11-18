@@ -21,7 +21,7 @@ two uppercase letters, defaulting to the first two letters in the Project name (
 Tasks receive rising ids such as `HE-1` and a branch `hw/HE-1` from the Project's
 configured base branch. The coordinator takes one task at a time; later tasks are queued.
 
-`up` starts the Project's one coordinator, `f-hello-coord`, with no parent. It refuses
+`up` starts the Project's one coordinator, `hw-hello-coord`, with no parent. It refuses
 a second live coordinator. `say` also brings a missing coordinator up. Messages are
 recorded unchanged with rising numbers before delivery; `say hello --number 1` retries
 that exact message after a delivery error. Repeated numbers reuse their task and receive

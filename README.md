@@ -63,12 +63,15 @@ Agents run in [herdr core](https://github.com/herdrdev/herdr-core) terminals, so
 working when you close the window. Watch one live with `hc attach NAME` (`hw status`
 prints the names).
 
+`hw help` is the short guide; `hw help TOPIC` covers models, house rules, servers and more.
+
 ## Use it from Claude
 
 `hw setup` installs a [Claude Code skill](skills/herdworks/SKILL.md), so you can tell Claude
 "give myapp this task" in any Claude Code session on the same machine. Claude sends it with
 `hw say`, waits in the background with `hw wait`, relays the coordinator's questions to you and
-reports the pull request when it is done. Other agents can follow the same file.
+reports the pull request when it is done. Any other agent (Codex, a ChatGPT dot) can learn
+the same steps by running `hw help agent` first.
 
 ## House rules
 
