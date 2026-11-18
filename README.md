@@ -102,8 +102,9 @@ Updates never overwrite your copies.
 A skill is a folder with a `SKILL.md` that the agents can load. Install them into
 `~/.agents/skills`; Herdworks does not install, fetch or edit them. `hw skills` lists the
 skills a worker can see, where each one lives and which agents (opencode, Codex) search that
-folder. `hw skills --project myapp` also searches the repository's `.agents/skills` and flags
-a house rule that names a skill which is not installed. To give a worker a skill per task,
+folder, and reports machine house-rule lines that name a skill which is not installed, without
+needing `--project`. `hw skills --project myapp` additionally searches the repository's
+`.agents/skills` and the Project's own rules. To give a worker a skill per task,
 per Project, per machine or per role, see `hw help rules`.
 
 ## Models

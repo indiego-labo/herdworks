@@ -77,6 +77,56 @@ class SkillsTests(RunCase):
         self.assertIn('never-installed', missing_section)
         self.assertNotIn('tmp-skill', missing_section)
 
+    def test_file_names_are_not_skills_but_a_slug_on_the_line_is(self):
+        machine = self.home / 'rules'
+        machine.mkdir(parents=True)
+        (machine / 'build.md').write_text(
+            'Create a `SKILL.md` in each skill folder.\n'
+            'Follow `docs/skills/index.md`.\n'
+            'Read the `README` when a skill folder is new.\n'
+            'Use the `tmp-proof-skill` skill and put a `SKILL.md` in it.\n')
+
+        found = skills.missing(self.project)
+        self.assertEqual([(item['name'], item['line']) for item in found],
+                         [('tmp-proof-skill', 4)])
+
+    def test_plain_skill_name_after_use_load_or_follow_is_reported(self):
+        machine = self.home / 'rules'
+        machine.mkdir(parents=True)
+        (machine / 'build.md').write_text(
+            'Use the release-notes skill for every release.\n'
+            'Load the changelog-writer skill before tagging.\n'
+            'Follow the audit-log skill when reviewing.\n'
+            'Release notes live in a skill folder.\n'
+            'The release-notes skill exists.\n')
+
+        found = skills.missing(self.project)
+        self.assertEqual([(item['name'], item['line']) for item in found],
+                         [('release-notes', 1), ('changelog-writer', 2), ('audit-log', 3)])
+
+    def test_overridden_machine_rule_is_not_scanned(self):
+        machine = self.home / 'rules'
+        machine.mkdir(parents=True)
+        (machine / 'build.md').write_text('Follow the `ghost-skill` skill.\n')
+        project_rules = self.project / 'rules'
+        project_rules.mkdir()
+        (project_rules / 'build.md').write_text('Follow the `real-skill` skill.\n')
+
+        self.assertEqual([(item['where'], item['name']) for item in skills.missing(self.project)],
+                         [('Project', 'real-skill')])
+        self.assertEqual([(item['where'], item['name']) for item in skills.missing()],
+                         [('machine', 'ghost-skill')])
+
+    def test_help_and_readme_say_machine_rules_need_no_project(self):
+        page = help_text('rules')
+        self.assertIn('reports machine house-rule lines that name a', page)
+        self.assertIn('works without `--project`', page)
+        self.assertIn('Only the rule files in effect are searched', page)
+        self.assertIn('File names such as `SKILL.md`', page)
+        readme = (ROOT / 'README.md').read_text()
+        self.assertIn('machine house-rule lines that name a skill which is not installed', readme)
+        self.assertIn('needing `--project`', readme)
+
     def test_glob_and_plain_folder_are_not_mistaken_for_skills(self):
         machine = self.home / 'rules'
         machine.mkdir(parents=True)
