@@ -47,7 +47,7 @@ class VerifyBriefTests(RunCase):
         self.assertEqual(events(self.path)[-1]['commit'], self.sha)
         self.assertEqual(events(self.path)[-1]['launch_source'], 'template')
         self.assertEqual(launch.call_args.kwargs['template'], 'hw-verifier')
-        with self.assertRaisesRegex(ValueError, 'PASS'):
+        with self.assertRaisesRegex(ValueError, 'wait for the verdict'):
             spawn(self.path, 'evidence')
         (self.path / 'verify-1/verdict.md').write_text(f'FAIL\n{self.sha}')
         with self.assertRaisesRegex(ValueError, 'PASS'):

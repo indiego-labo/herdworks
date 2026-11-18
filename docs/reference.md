@@ -66,6 +66,12 @@ CONFIRMED evidence review. Tasks derive their status from current artifacts on e
 There are 12 worker sessions per task, three fix rounds and two replacements per step.
 `stop` ends only that task's workers; the Project coordinator stays available.
 
+An evidence reviewer starts only after the verifier's `verdict.md` is written and its verifier
+session has finished; `spawn ... evidence` otherwise refuses and says to wait. If the newest
+review began before the verdict it inspects, `spawn ... evidence` starts a fresh review, keeps
+the old one and counts the new session against the task budget. One command replaces a review
+that the gate refuses.
+
 For fixture proof, `task new --role build /absolute/program` substitutes a worker program.
 Roles are build, verify and evidence. Programs receive the brief path as their sole argument
 and run in a macOS operating-system sandbox with private temporary storage and no network

@@ -58,6 +58,29 @@ def build_verify_brief(path, commit, worktree, root=ROOT):
 
 
 DEFAULT_STUCK = {"build": 60, "verify": 45, "evidence": 20}
+VERDICT_OPENINGS = ("PASS", "FAIL", "INCONCLUSIVE")
+
+
+def evidence_wait_reason(verdict, verifier):
+    """Return why no review may start yet, or None when the verdict is settled."""
+    if verifier and verifier.get("address") and hc.get(verifier["address"]).get("state") == "live":
+        return ("evidence review must wait for the verdict: the verifier session is still live; "
+                "wait for the verdict before starting a review")
+    if verdict is None:
+        return ("evidence review must wait for the verdict: verdict.md is missing; "
+                "wait for the verifier to write it")
+    if first_line(verdict) not in VERDICT_OPENINGS:
+        return ("evidence review must wait for the verdict: verdict.md is still being written; "
+                "wait for the verifier to finish")
+    return None
+
+
+def stale_review(previous, verdict):
+    """True when the newest review began before its verdict and may be replaced."""
+    if not verdict or previous.get("started_at", 0) >= verdict.stat().st_mtime:
+        return False
+    state = hc.get(previous["address"]).get("state") if previous.get("address") else "missing"
+    return state != "live"
 
 
 def answer_text(path):
@@ -234,6 +257,14 @@ def spawn(path, role="build", root=ROOT, replaces=None):
         commit = built_commit(path) if worker_role != "build" else None
         if worker_role != "build" and not commit:
             raise ValueError("a READY report matching a new branch head is required")
+        verdict = newest_artifact(path, "verify-*/verdict.md")
+        verifier = next((e for e in reversed(history) if e.get("event") == "session"
+                         and e.get("role") == "verify" and verdict
+                         and e.get("folder") == verdict.parent.name), None)
+        if worker_role == "evidence":
+            reason = evidence_wait_reason(verdict, verifier)
+            if reason:
+                raise ValueError(reason)
         target = None
         if replaces:
             target = next((e for e in workers if e.get("name") == replaces), None)
@@ -273,12 +304,12 @@ def spawn(path, role="build", root=ROOT, replaces=None):
                     attempts = [e for e in workers if e.get("step") == step and not e.get("replaces")]
                     if len(attempts) >= 2 and cause != "Cause: external-prerequisite":
                         raise ValueError("inconclusive verifier rerun exhausted; ask the user")
+                elif worker_role == "evidence" and stale_review(previous, verdict):
+                    # The review began before the verdict it inspects; the gate must refuse it.
+                    # Start a fresh one in a new folder and keep the old review for the record.
+                    pass
                 else:
                     raise RuntimeError(f"worker already started as {previous['name']}; inspect its artifact")
-        verdict = newest_artifact(path, "verify-*/verdict.md")
-        verifier = next((e for e in reversed(history) if e.get("event") == "session"
-                         and e.get("role") == "verify" and verdict
-                         and e.get("folder") == verdict.parent.name), None)
         if worker_role == "evidence" and (not verdict or (first_line(verdict) != "PASS" and not environment_only(verdict)) or not verifier
                                            or verifier.get("commit") != commit):
             raise ValueError("evidence review requires the newest recorded verifier's PASS verdict")

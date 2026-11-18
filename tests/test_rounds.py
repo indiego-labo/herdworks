@@ -1,4 +1,7 @@
+import os
+import time
 from unittest.mock import patch
+from herdworks.gate import gate
 from herdworks.runs import append_event, events, git
 from herdworks.spawn import spawn
 from tests.support import RunCase
@@ -200,3 +203,98 @@ class EnvironmentBlockerTests(BuildScenario):
                           'PASSED-OTHER-CHECKS: Remaining evidence inspected\n')
         with self.assertRaisesRegex(ValueError, 'do not retry'):
             spawn(self.path, 'evidence')
+
+
+class EvidenceGateTests(BuildScenario):
+    def passed_verdict(self):
+        spawn(self.path)
+        commit = self.ready()
+        spawn(self.path, 'verify')
+        verifier = [e for e in events(self.path) if e.get('role') == 'verify'][-1]
+        verdict = self.path / verifier['folder'] / 'verdict.md'
+        verdict.write_text(f'PASS\nCommit: {commit}\n')
+        (verdict.parent / 'evidence').mkdir()
+        (verdict.parent / 'evidence/cli.txt').write_text('python3 hello.py\nHello, Ada!\n')
+        return commit, verifier, verdict
+
+    def stale_review(self, commit, verifier, verdict):
+        """Record a review that began three seconds before its verdict (the HW-1 shape)."""
+        now = time.time()
+        os.utime(verdict, (now, now))
+        folder = self.path / 'evidence-1'
+        folder.mkdir()
+        (folder / 'review.md').write_text('CONFIRMED\n')
+        os.utime(folder / 'review.md', (now, now))
+        append_event(self.path, dict(event='session', role='evidence', address='t4',
+                                     name='hw-unit-he-1-evidence-1', folder='evidence-1',
+                                     started_at=now - 3, stuck_after_minutes=20,
+                                     launch_source='template', commit=commit,
+                                     verifier=verifier['name']))
+        return folder
+
+    def test_evidence_refused_while_verdict_is_missing(self):
+        spawn(self.path)
+        self.ready()
+        spawn(self.path, 'verify')
+        with patch('herdworks.hc.launch') as launch:
+            with self.assertRaisesRegex(ValueError, 'must wait for the verdict.*missing'):
+                spawn(self.path, 'evidence')
+            launch.assert_not_called()
+        self.assertFalse((self.path / 'evidence-1').exists())
+
+    def test_evidence_refused_while_verdict_is_being_written(self):
+        spawn(self.path)
+        self.ready()
+        spawn(self.path, 'verify')
+        (self.path / 'verify-1/verdict.md').write_text('')
+        with patch('herdworks.hc.launch') as launch:
+            with self.assertRaisesRegex(ValueError, 'must wait for the verdict.*still being written'):
+                spawn(self.path, 'evidence')
+            launch.assert_not_called()
+        self.assertFalse((self.path / 'evidence-1').exists())
+
+    def test_evidence_refused_while_verifier_session_is_live(self):
+        commit, verifier, verdict = self.passed_verdict()
+        with patch('herdworks.hc.get', return_value={'state': 'live'}):
+            with patch('herdworks.hc.launch') as launch:
+                with self.assertRaisesRegex(ValueError, 'must wait for the verdict.*still live'):
+                    spawn(self.path, 'evidence')
+                launch.assert_not_called()
+        self.assertFalse((self.path / 'evidence-1').exists())
+
+    def test_stale_review_is_replaced_by_one_spawn_and_gate_accepts_it(self):
+        commit, verifier, verdict = self.passed_verdict()
+        old = self.stale_review(commit, verifier, verdict)
+        result = spawn(self.path, 'evidence')
+        fresh = events(self.path)[-1]
+        self.assertEqual(fresh['folder'], 'evidence-2')
+        self.assertEqual(fresh['step'], f'evidence:{commit}')
+        self.assertGreaterEqual(fresh['started_at'], verdict.stat().st_mtime)
+        self.assertEqual(result['address'], fresh['address'])
+        self.assertTrue((old / 'review.md').is_file())
+        (self.path / 'evidence-2/review.md').write_text('CONFIRMED\n')
+        passed, gate_commit, reasons = gate(self.path)
+        self.assertTrue(passed, reasons)
+        self.assertEqual(gate_commit, commit)
+
+    def test_stale_review_replacement_counts_against_session_budget(self):
+        commit, verifier, verdict = self.passed_verdict()
+        self.stale_review(commit, verifier, verdict)
+        (self.home / 'config.json').write_text('{"max_sessions_per_task": 3}')
+        with patch('herdworks.hc.launch') as launch:
+            with self.assertRaisesRegex(ValueError, 'budget'):
+                spawn(self.path, 'evidence')
+            launch.assert_not_called()
+        self.assertFalse((self.path / 'evidence-2').exists())
+
+    def test_review_after_verdict_still_passes_gate_and_is_not_duplicated(self):
+        commit, verifier, verdict = self.passed_verdict()
+        spawn(self.path, 'evidence')
+        folder = self.path / events(self.path)[-1]['folder']
+        (folder / 'review.md').write_text('CONFIRMED\n')
+        passed, gate_commit, reasons = gate(self.path)
+        self.assertTrue(passed, reasons)
+        self.assertEqual(gate_commit, commit)
+        with self.assertRaisesRegex(RuntimeError, 'already started'):
+            spawn(self.path, 'evidence')
+        self.assertFalse((self.path / 'evidence-2').exists())
