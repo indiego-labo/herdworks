@@ -88,10 +88,12 @@ def authorize(project, memory_task=None, memory_command=False):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Message a Project and follow its tasks")
+    parser = argparse.ArgumentParser(description="Message a Project and follow its tasks. Start with: hw help")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("install")
     sub.add_parser("config")
+    command = sub.add_parser("help", help="guides for people and agents: hw help [agent|models|rules|server|automations|reference]")
+    command.add_argument("topic", nargs="?")
     command = sub.add_parser("rules", help="show or copy the house rules workers follow")
     command.add_argument("action", nargs="?", choices=["list", "copy"], default="list")
     command.add_argument("name", nargs="?", choices=["all", "build", "verify", "review"])
@@ -188,6 +190,10 @@ def main(argv=None):
         if name == "pr":
             command.add_argument("--manual-verification", action="store_true")
             command.add_argument("--title", help="short pull request title; defaults to the brief first sentence, up to 72 characters")
+    if not (sys.argv[1:] if argv is None else list(argv)):
+        from .help import text
+        print(text(), end="")
+        return 0
     args = parser.parse_args(argv)
     try:
         if hc.owner_mutation(list(argv) if argv is not None else sys.argv[1:]):
@@ -230,6 +236,9 @@ def main(argv=None):
                 print(memory.add(project, args.task, args.title, args.text))
             else:
                 print(memory.read(project, args.task, args.role))
+        elif args.command == "help":
+            from .help import text
+            print(text(args.topic), end="")
         elif args.command == "rules":
             from . import rules
             project = project_path(args.project) if args.project else None
