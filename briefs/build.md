@@ -1,4 +1,5 @@
 This is a builder task; the coordinator owns independent verification.
+If a skill or house rule conflicts with the task protocol in this brief (starting agents, pushing, the READY line, the verdict and review files), the protocol wins.
 Read the four sources in this brief as one task. Implement only the original request,
 using the coordinator's intent as the proposed done check. Prove the behavior with the target's
 verify-* skill, and record exact commands and results.

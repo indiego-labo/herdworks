@@ -1,4 +1,5 @@
 This is a fresh fix builder for a failed verification gate. Diagnose before fixing.
+If a skill or house rule conflicts with the task protocol in this brief (starting agents, pushing, the READY line, the verdict and review files), the protocol wins.
 Read the original request, findings and previous diagnoses below. Reproduce the failure,
 confirm its cause, and write a Diagnosis section in ../report.md BEFORE editing product code.
 Then correct the cause, rerun your proof including the original failure, and make one local

@@ -98,6 +98,9 @@ def main(argv=None):
     command.add_argument("action", nargs="?", choices=["list", "copy"], default="list")
     command.add_argument("name", nargs="?", choices=["all", "build", "verify", "review"])
     command.add_argument("--project", help="a Project's own rules instead of this machine's")
+    command = sub.add_parser("skills",
+                             help="skills workers can load, and house rules that name a missing one")
+    command.add_argument("--project", help="also search this Project's repository for skills")
     command = sub.add_parser("setup", help="sign in and add a first Project; safe to run again")
     command.add_argument("--check", action="store_true", help="only report what is missing")
     command = sub.add_parser('status')
@@ -250,6 +253,12 @@ def main(argv=None):
                 print(f"copied to {rules.copy(args.name, project)}; edit it there")
             else:
                 print("\n".join(rules.listing(project)))
+        elif args.command == "skills":
+            from . import skills
+            project = project_path(args.project) if args.project else None
+            if project is not None:
+                read_project(project)
+            print("\n".join(skills.listing(project)))
         elif args.command == "setup":
             from .setup import setup
             return setup(check_only=args.check)

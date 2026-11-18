@@ -21,6 +21,7 @@ with hw say), DONE (finished, with the pull request) or PROBLEM (needs the owner
     hw setup --check          only report what is missing
     hw project add NAME --repo PATH --base main   add another Project by hand
     hw rules                  the house rules workers follow
+    hw skills                 skills workers can load, and rules naming a missing one
 
 ## More help
 

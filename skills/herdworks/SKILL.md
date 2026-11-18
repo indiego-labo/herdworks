@@ -60,3 +60,6 @@ open (`hw tasks PROJECT` shows them). Exit code 2 means the timeout passed with 
 - To stop a task, send the user's request to the coordinator (`hw say PROJECT "Stop MY-1"`).
 - How workers build and verify is set by house rules (`hw rules`); suggest the user edits them
   with `hw rules copy NAME [--project PROJECT]` when they want work done differently.
+- `hw skills [--project PROJECT]` shows which skills workers can load and flags a house rule that
+  names one which is not installed. The user installs skills into `~/.agents/skills`; Herdworks
+  does not install them.

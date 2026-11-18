@@ -62,6 +62,13 @@ Use the project [verify-herdworks skill](../.agents/skills/verify-herdworks/SKIL
 It requires a scratch core and Herdworks home. Run unit checks with
 `hc exec -- python3 -m unittest discover -s tests` from a sandboxed caller.
 
+`hw skills [--project PROJECT]` lists the skills a worker can load: `~/.agents/skills` (opencode
+and Codex), `~/.claude/skills` and `~/.config/opencode/skills` (opencode), `~/.codex/skills`
+(Codex) and, with a Project, its repository's `.agents/skills` (both). It names each skill's
+folder, the agents that search it, and any machine or Project house-rule line that names a skill
+which is not installed. Herdworks never installs or fetches skills; `hw help rules` explains how
+to give one to a task, a Project, the machine or a role.
+
 Project memory and machine limits are stored outside the repository in Herdworks home.
 `hw config` prints effective limits; edit `config.json` as the owner to change them.
 The defaults are two active tasks, four live workers, six worker worktrees, 5 GiB free disk,
