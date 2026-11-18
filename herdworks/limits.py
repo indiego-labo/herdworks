@@ -31,8 +31,10 @@ def validate_agents(agents):
     if not isinstance(agents, dict) or set(agents) - set(ROLES):
         raise ValueError('agents must name coordinator, builder, verifier or evidence-reviewer')
     for choice in agents.values():
-        if not isinstance(choice, dict) or set(choice) - {'agent', 'model'}:
-            raise ValueError('each agent choice accepts agent and model')
+        if not isinstance(choice, dict) or set(choice) - {'agent', 'model', 'reasoning'}:
+            raise ValueError('each agent choice accepts agent, model and reasoning')
+        if 'reasoning' in choice and choice['reasoning'] not in ('minimal', 'low', 'medium', 'high', 'xhigh', 'max'):
+            raise ValueError('reasoning must be minimal, low, medium, high, xhigh or max')
         if choice.get('agent', 'codex') not in ('codex', 'opencode'):
             raise ValueError('agent must be codex or opencode')
         if 'model' in choice and (not isinstance(choice['model'], str) or not choice['model'].strip()):
@@ -53,7 +55,7 @@ def role_settings(project, role):
         raise ValueError('opencode requires a model name')
     if agent == 'opencode' and data.get('grants', {}).get('unsandboxed') is not True:
         raise ValueError('Project must grant unsandboxed sessions before using opencode')
-    return dict(agent=agent, model=model, sandboxed=agent != 'opencode' and machine['sandbox'] == 'on')
+    return dict(agent=agent, model=model, reasoning=choice.get('reasoning'), sandboxed=agent != 'opencode' and machine['sandbox'] == 'on')
 
 
 def launcher_settings(cwd, role):
