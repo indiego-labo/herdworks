@@ -25,7 +25,9 @@ build, verify or merge anything yourself.
 2. Send the user's request with their own words. Add a done check only if the user gave one or
    agrees to yours; never add requirements they did not ask for:
    `hw say PROJECT "THE USER'S REQUEST. Done when ..."`
-   Several unrelated tasks can go in separate messages. Each gets an id such as `MY-1`.
+   If they want it based on another branch, add `--base BRANCH`; the draft pull request opens
+   against that branch. Several unrelated tasks can go in separate messages. Each gets an id
+   such as `MY-1`.
 3. Start waiting in the background (in Claude Code, run it as a background command so you are
    told when it ends, and keep talking to the user meanwhile):
    `hw wait PROJECT --since "$last" --timeout 3600`

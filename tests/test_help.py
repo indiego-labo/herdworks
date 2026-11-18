@@ -19,4 +19,9 @@ class HelpTests(RunCase):
             self.assertIn('choose a model', next_step())
             (self.root / 'empty').mkdir()
             (self.root / 'empty/config.json').write_text('{}')
+            self.assertIn('choose a model', next_step())
+            (self.root / 'empty/config.json').write_text('{"agents": {}}')
+            self.assertIn('choose a model', next_step())
+            (self.root / 'empty/config.json').write_text(
+                '{"agents": {"builder": {"agent": "codex"}}, "max_tasks_at_once": 1}')
             self.assertIn('add your first Project', next_step())

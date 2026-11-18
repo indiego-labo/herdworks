@@ -38,6 +38,17 @@ hw status            # what is running right now
 Each message becomes a task with an id like `MY-1`. You can send more while it works.
 If a task needs a decision from you, `hw read` shows the question; answer with `hw say`.
 
+Any repository your GitHub sign-in can push to can become a Project; Herdworks clones it
+for you under `~/.herdworks/repos`, so there is nothing to clone by hand:
+
+```sh
+hw project add myapp --github owner/myapp
+hw say myapp --base release/2 "Backport the sign-up fix. Done when the tests pass."
+```
+
+Tasks start from the newest version of their base branch on GitHub, and a `--base` task's
+draft pull request opens against that branch.
+
 ## How it works
 
 ```

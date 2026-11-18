@@ -23,6 +23,18 @@ class TalkTests(RunCase):
         self.assertEqual(call.call_args_list[2].args, call.call_args_list[0].args)
         self.assertFalse(any('--force' in c.args for c in call.call_args_list))
 
+    def test_base_branch_is_recorded_with_the_message(self):
+        with patch('herdworks.hc.get', return_value=self.live()), patch('herdworks.hc.call'):
+            self.assertEqual(say(self.project, 'backport it', base='feature/x'), (1, False))
+            self.assertEqual(inbox(self.project)[0]['base'], 'feature/x')
+            with self.assertRaisesRegex(ValueError, 'original base branch'):
+                say(self.project, number=1, base='other/place')
+        self.assertEqual(len(inbox(self.project)), 1)
+        with patch('herdworks.hc.get', return_value=self.live()), patch('herdworks.hc.call'):
+            with self.assertRaisesRegex(ValueError, 'valid branch name'):
+                say(self.project, 'again', base='bad..name')
+        self.assertEqual(len(inbox(self.project)), 1)
+
     def test_read_since_and_invalid_opening(self):
         outbox = self.project / 'coordinator/outbox'
         for number, kind in enumerate(('REPLY', 'QUESTION', 'DONE'), 1):

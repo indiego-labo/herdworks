@@ -79,10 +79,13 @@ def inbox(project):
     return [json.loads(line) for line in (project / "inbox.jsonl").read_text().splitlines() if line]
 
 
-def say(project, text=None, number=None, root=ROOT, delivery_key=None):
-    read_project(project)
+def say(project, text=None, number=None, root=ROOT, delivery_key=None, base=None):
+    data = read_project(project)
     if text is not None and not text.strip():
         raise ValueError("message must not be empty")
+    if base is not None:
+        from .projects import valid_branch
+        valid_branch(data["repo"], base)
     with locked(project):
         current = hc.get(coordinator_name(project))
         if current.get("state") == "live" and status_word(current) == "blocked":
@@ -99,11 +102,15 @@ def say(project, text=None, number=None, root=ROOT, delivery_key=None):
                 raise ValueError("unknown message number")
             if text is not None and text != entry["text"]:
                 raise ValueError("repeat must use the original text")
+            if base is not None and base != entry.get("base"):
+                raise ValueError("repeat must use the original base branch")
         else:
             if text is None:
                 raise ValueError("message text is required")
             number = max((m["number"] for m in messages), default=0) + 1
             entry = dict(number=number, text=text, at=time.time())
+            if base is not None:
+                entry["base"] = base
             if delivery_key is not None:
                 entry["delivery_key"] = delivery_key
             with (project / "inbox.jsonl").open("a") as stream:

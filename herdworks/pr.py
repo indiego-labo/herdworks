@@ -50,6 +50,7 @@ def repository_identity(address):
 
 def build_body(path, commit, manual_verification=False):
     data = read_task(path)
+    base_branch = data.get('base_branch') or read_project(path.parents[1])['base_branch']
     verdict = newest_artifact(path, "verify-*/verdict.md")
     review = newest_artifact(path, "evidence-*/review.md")
     commands = verdict.parent / "evidence/commands.json"
@@ -76,7 +77,8 @@ def build_body(path, commit, manual_verification=False):
                'The independent verifier checked this commit; the evidence reviewer confirmed its proof.')
     scope = 'built commit' if manual_verification else 'verified commit'
     return redact(f"## Why\n\n{why}\n\n"
-                  f"## Scope\n\nTask {data['id']}, branch {data['branch']}, based on {data['base']}. "
+                  f"## Scope\n\nTask {data['id']}, branch {data['branch']}, based on {base_branch} "
+                  f"at {data['base']}. "
                   f"Covers the original request and its {scope}. Follow-up work is outside this draft.\n\n"
                   f"## Blast Radius\n\nChanged files:\n\n{fenced(changed)}\n\n"
                   f"{summary}\n\n"
@@ -118,6 +120,7 @@ def open_pr(path, manual_verification=False, title=None):
             raise ValueError('pull request title must not be empty')
         if manual_verification:
             title = '[Needs manual verification] ' + title
+        base_branch = data.get('base_branch') or config['base_branch']
         body = path / "pr-body.md"
         body.write_text(build_body(path, commit, manual_verification))
         git(config["repo"], "push", remote, f"{commit}:refs/heads/{data['branch']}")
@@ -127,7 +130,7 @@ def open_pr(path, manual_verification=False, title=None):
                                 branch=data["branch"], remote=remote, manual_verification=manual_verification))
         result = subprocess.run([config.get("gh", "gh"), "pr", "create", "--draft",
                                  "--repo", repository,
-                                 "--base", config["base_branch"], "--head", data["branch"],
+                                 "--base", base_branch, "--head", data["branch"],
                                  "--title", title,
                                  "--body-file", str(body),
                                  *(["--label", "needs-manual-verification"] if manual_verification else [])],
