@@ -61,5 +61,5 @@ else:
     if os.environ.get("XDG_RUNTIME_DIR"):
         args += ["--add-dir", str(Path(os.environ["XDG_RUNTIME_DIR"]) / "herdr-core")]
 if settings:
-    args += ["-m", (settings["model"] or ("gpt-6-luna" if Path.cwd().name == "work" else "gpt-6.1-sol")), "-c", "model_reasoning_effort=" + ("medium" if mode == "coordinator" or mode == "verify" and Path.cwd().name != "work" else "max" if Path.cwd().name == "work" else "low")]
+    args += ["-m", (settings["model"] or ("gpt-6-luna" if Path.cwd().name == "work" else "gpt-6.1-sol")), "-c", "model_reasoning_effort=" + (settings.get("reasoning") or ("medium" if mode == "coordinator" or mode == "verify" and Path.cwd().name != "work" else "max" if Path.cwd().name == "work" else "low"))]
 os.execvp("codex", args + sys.argv[2:])

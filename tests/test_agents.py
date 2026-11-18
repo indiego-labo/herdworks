@@ -18,7 +18,14 @@ class AgentTests(RunCase):
         data['agents'] = {'builder': {'model': 'other/model'}}
         p.write_text(json.dumps(data))
         self.assertEqual(role_settings(self.project, 'build'),
-                         dict(agent='opencode', model='other/model', sandboxed=False))
+                         dict(agent='opencode', model='other/model', reasoning=None, sandboxed=False))
+        data['agents'] = {'builder': {'model': 'other/model', 'reasoning': 'xhigh'}}
+        p.write_text(json.dumps(data))
+        self.assertEqual(role_settings(self.project, 'build')['reasoning'], 'xhigh')
+        data['agents'] = {'builder': {'model': 'other/model', 'reasoning': 'huge'}}
+        p.write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, 'reasoning must be'):
+            role_settings(self.project, 'build')
 
     def test_coordinator_choice_selects_template_and_records_sandbox(self):
         p = self.project / 'project.json'
