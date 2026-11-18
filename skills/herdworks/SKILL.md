@@ -50,8 +50,10 @@ open (`hw tasks PROJECT` shows them). Exit code 2 means the timeout passed with 
 
 ## Checking in
 
-- `hw tasks PROJECT`: each task, its status (`in progress`, `waiting on you`, `for review`,
-  `needs manual verification`, `verified`, `stopped`) and its pull request.
+- `hw tasks PROJECT`: each task, its status (`in progress`, `waiting on you`, `escalated`,
+  `for review`, `needs manual verification`, `verified`, `stopped`) and its pull request.
+  `escalated` means the same check failed on repeated builds and the coordinator's QUESTION
+  needs the user's decision before any more work starts.
 - `hw read PROJECT --since N`: replies after number N.
 - `hw status`: the live agents; `hc attach NAME` lets the user watch one.
 

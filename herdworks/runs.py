@@ -77,11 +77,18 @@ def newest_artifact(path, pattern):
 
 
 def waiting_on_answer(path):
+    ask = coordinator_task(path) / 'ask.md'
+    return ask.is_file() and not answered_since(path, ask.stat().st_mtime)
+
+
+def escalation(path):
+    """The open escalation event, or None once the user has answered it."""
+    event = next((e for e in reversed(events(path)) if e.get('event') == 'escalated'), None)
+    return event if event and not answered_since(path, event['at']) else None
+
+
+def answered_since(path, asked_at):
     notes = coordinator_task(path)
-    ask = notes / 'ask.md'
-    if not ask.is_file():
-        return False
-    asked_at = ask.stat().st_mtime
     inbox = Path(path).parents[1] / 'inbox.jsonl'
     messages = {m['number']: m for line in inbox.read_text().splitlines() if line
                 for m in [json.loads(line)]}
@@ -89,8 +96,8 @@ def waiting_on_answer(path):
         message = messages.get(int(answer.stem)) if answer.stem.isdecimal() else None
         if (message and message['at'] > asked_at
                 and answer.read_text().strip() == message['text'].strip()):
-            return False
-    return True
+            return True
+    return False
 
 
 def derive_status(path):
@@ -105,6 +112,8 @@ def derive_status(path):
     passed, commit, _ = check_gate(path)
     if passed:
         return 'verified'
+    if escalation(path):
+        return 'escalated'
     if waiting_on_answer(path):
         return "waiting on you"
     if any(e.get("event") == "session" and e.get("role") != "coordinator" for e in events(path)):

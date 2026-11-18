@@ -4,13 +4,13 @@ from unittest.mock import patch
 from herdworks.gate import gate
 from herdworks.runs import append_event, events, git
 from herdworks.spawn import spawn
-from tests.support import RunCase
+from tests.support import RunCase, write_claims
 
 
 class BuildScenario(RunCase):
     def setUp(self):
         super().setUp()
-        (self.home / "config.json").write_text(' {"max_worktrees": 20} ')
+        (self.home / "config.json").write_text(' {"max_worktrees": 20, "max_same_reason_failures": 9} ')
         (self.notes / "intent.md").write_text("DONE CHECK")
         append_event(self.path, dict(event="session", role="coordinator", name="hw-unit-coord", address="t1"))
         self.launcher = patch("herdworks.hc.launch", side_effect=self.launch)
@@ -36,6 +36,7 @@ class BuildScenario(RunCase):
         verifier = [e for e in events(self.path) if e.get("role") == "verify"][-1]
         (self.path / verifier["folder"] / "verdict.md").write_text(
             f"FAIL\nCommit: {verifier['commit']}\nFinding: wrong output\n")
+        gate(self.path)
 
 
 class RoundTests(BuildScenario):
@@ -85,6 +86,7 @@ class RoundTests(BuildScenario):
         self.assertTrue(saved.endswith("Screen text:\nlast screen"))
         self.assertIn(f"Commit: {first['commit']}\n", saved)
         (self.path / "verify-2/verdict.md").write_text(f"FAIL\nCommit: {first['commit']}")
+        gate(self.path)
         spawn(self.path, "fix")
         self.assertEqual(events(self.path)[-1]["round"], 1)
         self.assertEqual(events(self.path)[-1]["name"], "hw-unit-he-1-build-2")
@@ -194,6 +196,7 @@ class EnvironmentBlockerTests(BuildScenario):
         verdict.write_text(f'INCONCLUSIVE\nCommit: {commit}\n'
                            'BLOCKED-BY-ENVIRONMENT: Test on device; no device available\n'
                            'PASSED-OTHER-CHECKS: Unit tests and CLI passed\n')
+        write_claims(verdict.parent, 'PROVED', 'NOT_PROVED')
         with self.assertRaisesRegex(ValueError, 'do not retry'):
             spawn(self.path, 'verify')
         self.assertFalse((self.path / 'verify-2').exists())
@@ -213,8 +216,7 @@ class EvidenceGateTests(BuildScenario):
         verifier = [e for e in events(self.path) if e.get('role') == 'verify'][-1]
         verdict = self.path / verifier['folder'] / 'verdict.md'
         verdict.write_text(f'PASS\nCommit: {commit}\n')
-        (verdict.parent / 'evidence').mkdir()
-        (verdict.parent / 'evidence/cli.txt').write_text('python3 hello.py\nHello, Ada!\n')
+        write_claims(verdict.parent)
         return commit, verifier, verdict
 
     def stale_review(self, commit, verifier, verdict):

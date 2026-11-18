@@ -5,13 +5,13 @@ import time
 import uuid
 from datetime import datetime, timezone
 from . import hc
-from .gate import environment_only
+from .gate import claim_problems, environment_only
 from .limits import role_settings, hold_reason
 from .memory import brief as memory_brief
 from .pickup import remove_worktree
 from .probe import progress_time
 from . import rules
-from .runs import ROOT, append_event, built_commit, events, first_line, git, locked, newest_artifact, read_task, coordinator_task, task_key, is_stopped, coordinator, ARTIFACT, artifact_complete
+from .runs import ROOT, append_event, built_commit, events, first_line, git, locked, newest_artifact, read_task, coordinator_task, task_key, is_stopped, coordinator, ARTIFACT, artifact_complete, escalation
 
 
 def record_launch(path, result, *, name, role, folder, stuck_after, program=None, **metadata):
@@ -25,11 +25,15 @@ def record_launch(path, result, *, name, role, folder, stuck_after, program=None
         raise RuntimeError(f"first message was not sent to {name}; inspect hc read {name}")
 
 
+def spike_brief(path, root=ROOT):
+    return (root / "briefs/spike.md").read_text() if read_task(path).get("kind") == "spike" else ""
+
+
 def build_brief(path, root=ROOT):
     sources = [root / "briefs/build.md", path / "brief.md", coordinator_task(path) / "intent.md"]
     answers = sorted((coordinator_task(path) / "answers").glob("*.md"), key=lambda p: int(p.stem))
     parts = [f"--- {source.name} ---\n{source.read_text()}" for source in sources + answers]
-    parts.insert(1, rules.text("build", path.parents[1]))
+    parts.insert(1, spike_brief(path, root) + rules.text("build", path.parents[1]))
     return "\n\n".join(parts) + "\n"
 
 
@@ -47,7 +51,7 @@ def build_verify_brief(path, commit, worktree, root=ROOT):
     data = read_task(path)
     skills = sorted((worktree / ".agents/skills").glob("verify-*/SKILL.md"))
     checks = "\n".join(str(p) for p in skills) or "No verify-* skill found; use artifact-appropriate checks."
-    return (f"{(root / 'briefs/verify.md').read_text()}\n\n"
+    return (f"{(root / 'briefs/verify.md').read_text()}{spike_brief(path, root)}\n\n"
             f"{rules.text('verify', path.parents[1])}\n"
             f"Original request:\n{(path / 'brief.md').read_text()}\n\n"
             f"User answers:\n{answer_text(path)}\n\n"
@@ -96,14 +100,17 @@ def fix_brief(path, round_number, root):
             continue
         artifact = path / event["folder"] / ARTIFACT[role]
         if event.get("commit") == commit and first_line(artifact) in ("FAIL", "REJECTED"):
-            failed.append(artifact)
+            failed.append(artifact.read_text())
             break
+    checks = next((e.get("checks") for e in reversed(events(path)) if e.get("event") == "gate"), None) or {}
+    if checks.get("commit") == commit and checks.get("exit"):
+        failed.append(f"Checks command `{checks['command']}` exited {checks['exit']}. Its last output:\n{checks['tail']}")
     if not commit or not failed:
-        raise ValueError("fix requires a failed verdict or rejected review for the current built commit")
+        raise ValueError("fix requires a failed verdict, rejected review or failed checks for the current built commit")
     reports = sorted(path.glob("build-*/report.md"), key=lambda p: int(p.parent.name.split("-")[1]))
     return (f"{(root / 'briefs/fix.md').read_text()}\nFix round: {round_number} of 3\n\n"
             f"{build_brief(path, root)}\nFindings:\n" +
-            "\n\n".join(p.read_text() for p in failed) + "\nEarlier reports and diagnoses:\n" +
+            "\n\n".join(failed) + "\nEarlier reports and diagnoses:\n" +
             "\n\n".join(p.read_text() for p in reports) +
             "\nIf a later round repeats a cause, test the underlying assumption and reconsider the design.\n")
 
@@ -228,6 +235,9 @@ def spawn(path, role="build", root=ROOT, replaces=None):
             raise ValueError("task is closed")
         if is_stopped(path):
             raise ValueError("task is stopped")
+        if escalation(path):
+            raise ValueError("task is escalated: the gate refused it repeatedly for the same reason; "
+                             "ask the user and start nothing until they answer")
         from .pr import recorded_pr
         pr = recorded_pr(path)
         if pr and pr.get('manual_verification') and pr['commit'] == built_commit(path):
@@ -281,6 +291,9 @@ def spawn(path, role="build", root=ROOT, replaces=None):
                 raise ValueError("replacement must verify the same current commit")
             round_number = target.get("round", 0)
         elif role == "fix":
+            refusal = next((e for e in reversed(history) if e.get("event") == "gate"), None)
+            if not refusal or refusal.get("passed") or refusal.get("commit") != built_commit(path):
+                raise ValueError("fix requires the gate's refusal of the current built commit; run hw gate first")
             round_number += 1
             if round_number > 3:
                 raise ValueError("three fix rounds exhausted; ask with diagnoses and a recommendation")
@@ -296,7 +309,8 @@ def spawn(path, role="build", root=ROOT, replaces=None):
                 artifact = path / previous["folder"] / ARTIFACT[worker_role]
                 if not artifact_complete(artifact.parent, worker_role):
                     raise RuntimeError(f"worker already started as {previous['name']}; inspect its artifact")
-                if worker_role == "verify" and first_line(artifact) == "INCONCLUSIVE":
+                if worker_role == "verify" and (first_line(artifact) == "INCONCLUSIVE"
+                                                or claim_problems(artifact.parent, data.get("kind"))):
                     cause = next((line for line in artifact.read_text().splitlines() if line.startswith("Cause:")), "")
                     if cause == "Cause: external-prerequisite" and not any(
                             p.stat().st_mtime > artifact.stat().st_mtime for p in (coordinator_task(path) / "answers").glob("*.md")):
@@ -313,6 +327,8 @@ def spawn(path, role="build", root=ROOT, replaces=None):
         if worker_role == "evidence" and (not verdict or (first_line(verdict) != "PASS" and not environment_only(verdict)) or not verifier
                                            or verifier.get("commit") != commit):
             raise ValueError("evidence review requires the newest recorded verifier's PASS verdict")
+        if worker_role == "evidence" and (problems := claim_problems(verdict.parent, data.get("kind"))):
+            raise ValueError("evidence review requires usable claims; rerun the verifier: " + "; ".join(problems))
         brief = None
         if worker_role == "build":
             if target:
@@ -369,7 +385,8 @@ def spawn(path, role="build", root=ROOT, replaces=None):
                     f"create {setup['claim']} {data['base']}\nprepare\ncommit\n"))
             if worker_role == "evidence":
                 cwd.mkdir()
-                brief = (f"{(root / 'briefs/evidence.md').read_text()}\n{rules.text('evidence', path.parents[1])}\n"
+                brief = (f"{(root / 'briefs/evidence.md').read_text()}{spike_brief(path, root)}\n"
+                         f"{rules.text('evidence', path.parents[1])}\n"
                          f"Commit: {commit}\n"
                          f"Target repository: {data['repo']}\nBase: {data['base']}\n"
                          f"Original request:\n{(path / 'brief.md').read_text()}\n"

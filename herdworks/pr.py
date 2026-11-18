@@ -3,7 +3,7 @@ import re
 import subprocess
 import time
 from urllib.parse import urlsplit
-from .gate import check_gate, blocked_requirements
+from .gate import check_gate, blocked_requirements, read_claims
 from .projects import read_project
 from .runs import append_event, events, first_line, git, is_stopped, locked, newest_artifact, read_task
 
@@ -65,6 +65,7 @@ def build_body(path, commit, manual_verification=False):
     changed = git(data["repo"], "diff", "--stat", data["base"], commit)
     commit_label = 'Built commit' if manual_verification else 'Verified commit'
     proof = [f"Verdict: {first_line(verdict)}", f"{commit_label}: {commit}",
+             "Claims: " + ", ".join(f"{c['id']} {c['grade']}" for c in read_claims(verdict.parent) or []),
              f"Evidence review: {first_line(review)}",
              f"Project evidence: {verdict}, {review}, {commands}"]
     for record in records:

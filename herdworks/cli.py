@@ -8,7 +8,7 @@ import sys
 from . import hc
 from .gate import check_gate, gate, reap
 from .probe import format_fact, probe
-from .runs import ROOT, derive_status, locked, read_task, first_line, events
+from .runs import ROOT, derive_status, escalation, locked, read_task, first_line, events
 from .projects import add_project, add_github_project, project_path, task_path, task_paths, new_task, read_project
 from .talk import up, say, read, latest, wait
 from .spawn import spawn
@@ -182,6 +182,8 @@ def main(argv=None):
     command.add_argument("--role", nargs=2, action="append", default=[])
     command.add_argument("--stuck-after", type=float)
     command.add_argument("--base", help="branch to start from instead of the Project base")
+    command.add_argument("--kind", choices=["build", "spike"], default="build",
+                         help="spike: the task answers a question, and the gate accepts an evidenced no")
     command = actions.add_parser("close")
     command.add_argument("project")
     command.add_argument("task_id")
@@ -310,7 +312,7 @@ def main(argv=None):
             print(f"closed {args.task_id}: removed {len(removed)} worktrees")
         elif args.command == "task":
             path, repeat = new_task(project_path(args.project), args.brief, args.message,
-                                    dict(args.role), args.stuck_after, args.base)
+                                    dict(args.role), args.stuck_after, args.base, args.kind)
             reason = hold_reason(path, allocating=True)
             print(f"{path.name}" + (" repeat" if repeat else "") + (f" queued: {reason}" if reason else ""))
         else:
@@ -328,6 +330,9 @@ def main(argv=None):
             elif args.command == "gate":
                 passed, commit, reasons = gate(path)
                 print(f"VERIFIED {commit}" if passed else "REFUSED\n" + "\n".join(reasons))
+                if not passed and escalation(path):
+                    print(f"ESCALATED after {escalation(path)['failures']} refusals for the same reason; "
+                          "start no worker and ask the user")
                 return 0 if passed else 1
             elif args.command == "reap":
                 for name in reap(path):

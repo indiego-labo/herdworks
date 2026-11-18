@@ -66,6 +66,27 @@ CONFIRMED evidence review. Tasks derive their status from current artifacts on e
 There are 12 worker sessions per task, three fix rounds and two replacements per step.
 `stop` ends only that task's workers; the Project coordinator stays available.
 
+The verifier grades each acceptance criterion in `claims.json` beside its verdict: an `id`, a
+`check` (command or test name), a `grade` of `PROVED`, `DISPROVED` or `NOT_PROVED`, and an
+`evidence` path. The gate refuses a verdict whose first line does not follow from those grades,
+a `PROVED` or `DISPROVED` claim without a check and an existing evidence file, and a
+`NOT_PROVED` claim without a `reason`. A fix round needs the gate's refusal of the current
+commit, so run `gate` before `spawn ... fix`.
+
+Settings that change the gate:
+
+- `checks` in a Project's `project.json`, or in `config.json` for every Project: a shell command
+  such as `"npm ci && npm test"`. `hw gate` runs it in a fresh checkout of the built commit, so
+  include any install step, and refuses unless it exits 0, whatever the verdict says. The gate
+  event records the command, its exit code and the end of its output, and a failure goes into
+  the next fix brief. The command runs with `hw`'s own permissions, outside the worker sandbox.
+- `hw task new PROJECT --kind spike` (the coordinator adds it when you ask for an answer or a
+  go/no-go): the gate passes once every claim is graded and evidenced, so `DISPROVED` is an
+  accepted finding.
+- `max_same_reason_failures` in `config.json` or `project.json`: how many commits the gate may
+  refuse for the same reasons before the task becomes `escalated`. An escalated task starts no
+  worker until you answer the coordinator's question; `hw stop` ends it instead.
+
 An evidence reviewer starts only after the verifier's `verdict.md` is written and its verifier
 session has finished; `spawn ... evidence` otherwise refuses and says to wait. If the newest
 review began before the verdict it inspects, `spawn ... evidence` starts a fresh review, keeps

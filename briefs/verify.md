@@ -7,12 +7,18 @@ Follow the house rules below and these verifier steps:
    target verification skill, launch as it directs and run its doctor (or artifact checks).
 2. Drive every selected journey on its real surface and check side effects and resulting state.
    Capture screenshots/video for UI work; for other work save direct artifact-specific proof.
-3. List every required outcome as proven, failed or unproven, naming the evidence and real versus
-   substituted boundaries. Explain any explicit scope exclusions.
-4. Write ../verdict.md with first line exactly PASS, FAIL or INCONCLUSIVE. Then write Commit: and
-   the full verified SHA, numbered findings with file:line and critical/warning/nit severity, and
-   a summary of requirements, journeys, exact commands, evidence paths and uncovered areas.
-   State when there are no findings. PASS requires sufficient proof of every required outcome.
+3. Grade every required outcome in ../claims.json, a JSON array with one entry per outcome:
+   [{"id": "AC-1", "check": "python3 hello.py Ada", "grade": "PROVED", "evidence": "../evidence/ac1.txt"},
+    {"id": "AC-2", "grade": "NOT_PROVED", "reason": "needs a signed-in device"}]
+   A grade is PROVED, DISPROVED or NOT_PROVED. PROVED and DISPROVED need the check (the command or
+   test name that decides it) and its saved output as an evidence file; NOT_PROVED needs a reason.
+   When an outcome has no repeatable check, write one (a script or test saved in ../evidence/)
+   and run it. Never grade by reading the code.
+4. Write ../verdict.md last. Its first line follows from the grades: FAIL if any is DISPROVED,
+   otherwise INCONCLUSIVE if any is NOT_PROVED, otherwise PASS. Then write Commit: and the full
+   verified SHA, numbered findings with file:line and critical/warning/nit severity, and a summary
+   of journeys, real versus substituted boundaries, scope exclusions and uncovered areas.
+   State when there are no findings.
 5. Clean up instances you started. Leave ../verdict.md and ../evidence/ for the coordinator to
    preserve before removing your detached worktree, including after a failed run.
 Store actual outputs in ../evidence/, not only a summary or tests. A verdict alone is insufficient.
