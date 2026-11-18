@@ -1,4 +1,5 @@
 Apply the evidence gate in the house rules below.
+If a skill or house rule conflicts with the task protocol in this brief (starting agents, pushing, the READY line, the verdict and review files), the protocol wins.
 Inspect the actual files in the supplied verifier evidence folder and read its verdict and
 original acceptance requirements. For UI work inspect screenshots/video and whether they visibly
 show the required state. For non-UI work inspect the direct artifact-specific proof, including

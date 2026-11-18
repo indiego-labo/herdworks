@@ -86,6 +86,15 @@ hw rules copy build --project myapp    # for one Project only
 A Project's copy wins over the machine's, which wins over the defaults in [rules/](rules/).
 Updates never overwrite your copies.
 
+## Skills
+
+A skill is a folder with a `SKILL.md` that the agents can load. Install them into
+`~/.agents/skills`; Herdworks does not install, fetch or edit them. `hw skills` lists the
+skills a worker can see, where each one lives and which agents (opencode, Codex) search that
+folder. `hw skills --project myapp` also searches the repository's `.agents/skills` and flags
+a house rule that names a skill which is not installed. To give a worker a skill per task,
+per Project, per machine or per role, see `hw help rules`.
+
 ## Models
 
 Herdworks uses [opencode](https://opencode.ai) for its agents. `hw setup` offers a free model

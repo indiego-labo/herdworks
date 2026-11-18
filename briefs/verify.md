@@ -1,6 +1,7 @@
 Independently verify the committed change against the original request. The proposed journeys
 are coverage suggestions, not authority to narrow requirements. Do not read the builder's report,
 evidence or conclusions. Do not fix product code, run review angles or start other agents.
+If a skill or house rule conflicts with the task protocol in this brief (starting agents, pushing, the READY line, the verdict and review files), the protocol wins.
 Follow the house rules below and these verifier steps:
 1. Derive required outcomes from the original request and reconcile proposed coverage. Read the
    target verification skill, launch as it directs and run its doctor (or artifact checks).
