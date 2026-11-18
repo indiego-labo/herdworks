@@ -10,7 +10,7 @@ from herdworks.gate import check_gate
 from herdworks.pr import open_pr, repository_identity
 from herdworks.projects import grant_project, read_project
 from herdworks.runs import derive_status, events, git
-from tests.support import GateCase
+from tests.support import GateCase, write_claims
 
 
 class PRTests(GateCase):
@@ -247,6 +247,8 @@ class PRTests(GateCase):
             text += 'PASSED-OTHER-CHECKS: CLI and unit tests passed; evidence/commands.json\n'
         self.verdict.write_text(text)
         os.utime(self.verdict, (timestamp, timestamp))
+        if first == 'INCONCLUSIVE':
+            write_claims(self.verify, 'PROVED', 'NOT_PROVED')
 
     def test_manual_verification_draft_title_body_label_status_and_no_merge(self):
         self.environment_verdict()

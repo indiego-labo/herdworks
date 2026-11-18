@@ -222,8 +222,10 @@ def remote_base(repo, remote, base_branch):
     return git(repo, "rev-parse", local)
 
 
-def new_task(project, brief=None, message=None, roles=None, stuck_after=None, base=None):
+def new_task(project, brief=None, message=None, roles=None, stuck_after=None, base=None, kind="build"):
     data = read_project(project)
+    if kind not in ("build", "spike"):
+        raise ValueError("task kind must be build or spike")
     if stuck_after is not None and (stuck_after <= 0 or not math.isfinite(stuck_after)):
         raise ValueError("stuck-after must be a positive number of minutes")
     if roles and sys.platform != "darwin":
@@ -268,6 +270,8 @@ def new_task(project, brief=None, message=None, roles=None, stuck_after=None, ba
             metadata["roles"] = roles
         if stuck_after is not None:
             metadata["stuck_after_minutes"] = stuck_after
+        if kind != "build":
+            metadata["kind"] = kind
         pending = project / "tasks" / f".{task_id}-pending"
         pending.mkdir(exist_ok=True)
         (pending / "brief.md").write_text(text)

@@ -5,7 +5,7 @@ from pathlib import Path
 from .home import hw_home, sandbox_setting
 
 DEFAULTS = dict(max_tasks_at_once=2, max_worker_sessions=4, max_worktrees=6,
-                min_free_disk_gb=5, max_sessions_per_task=12)
+                min_free_disk_gb=5, max_sessions_per_task=12, max_same_reason_failures=2)
 ROLES = ('coordinator', 'builder', 'verifier', 'evidence-reviewer')
 
 
@@ -39,6 +39,13 @@ def validate_agents(agents):
             raise ValueError('agent must be codex or opencode')
         if 'model' in choice and (not isinstance(choice['model'], str) or not choice['model'].strip()):
             raise ValueError('model must be a nonempty name')
+
+
+def project_setting(project, name):
+    """A Project's own project.json value wins over this machine's config.json."""
+    from .projects import read_project
+    own = read_project(project).get(name)
+    return config(project.parents[1]).get(name) if own is None else own
 
 
 def role_settings(project, role):

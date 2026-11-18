@@ -4,6 +4,8 @@ Inspect the actual files in the supplied verifier evidence folder and read its v
 original acceptance requirements. For UI work inspect screenshots/video and whether they visibly
 show the required state. For non-UI work inspect the direct artifact-specific proof, including
 exact commands and outputs; tests, compilation or a plausible diff alone are insufficient.
+Read claims.json beside the verdict: reject when it omits an outcome the original request
+requires, or when a claim's evidence file does not show what its grade says.
 Confirm only when the evidence supports the required state for the verified commit and the
 verdict opens with PASS, or is INCONCLUSIVE solely for explicit BLOCKED-BY-ENVIRONMENT
 requirements with PASSED-OTHER-CHECKS and direct evidence for every remaining check.

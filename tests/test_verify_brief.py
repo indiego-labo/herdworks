@@ -2,7 +2,7 @@ from pathlib import Path
 from unittest.mock import patch
 from herdworks.runs import append_event, events, git, read_task
 from herdworks.spawn import build_verify_brief, spawn
-from tests.support import RunCase
+from tests.support import RunCase, write_claims
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -53,6 +53,7 @@ class VerifyBriefTests(RunCase):
         with self.assertRaisesRegex(ValueError, 'PASS'):
             spawn(self.path, 'evidence')
         (self.path / 'verify-1/verdict.md').write_text(f'PASS\n{self.sha}')
+        write_claims(self.path / 'verify-1')
         spawn(self.path, 'evidence')
         self.assertEqual(launch.call_args.kwargs['template'], 'hw-evidence-reviewer')
         self.assertEqual(launch.call_args.kwargs['cwd'], self.path / 'evidence-1/work')
@@ -81,6 +82,7 @@ class VerifyBriefTests(RunCase):
         launch.return_value = self.result
         spawn(self.path, 'verify')
         (self.path / 'verify-1/verdict.md').write_text(f'PASS\n{self.sha}')
+        write_claims(self.path / 'verify-1')
         launch.side_effect = FileNotFoundError('missing hc')
         with self.assertRaises(FileNotFoundError):
             spawn(self.path, 'evidence')

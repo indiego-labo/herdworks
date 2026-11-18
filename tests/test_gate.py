@@ -122,7 +122,8 @@ class GateTests(GateCase):
         self.assert_refused('recorded independent verify session')
 
     def test_empty_evidence(self):
-        (self.verify / 'evidence/cli.txt').unlink()
+        for file in (self.verify / 'evidence').iterdir():
+            file.unlink()
         self.assert_refused('at least one file')
 
     def test_missing_review(self):

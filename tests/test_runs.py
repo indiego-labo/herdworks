@@ -59,7 +59,7 @@ class TaskTests(RunCase):
             install(self.root, destination)
 
 
-from tests.support import GateCase
+from tests.support import GateCase, write_claims
 
 
 class ManualVerificationStatusTests(GateCase):
@@ -71,6 +71,7 @@ class ManualVerificationStatusTests(GateCase):
                                 'BLOCKED-BY-ENVIRONMENT: Run on target device; device unavailable\n'
                                 'PASSED-OTHER-CHECKS: All executable checks passed\n')
         os.utime(self.verdict, (timestamp, timestamp))
+        write_claims(self.verify, 'PROVED', 'NOT_PROVED')
         append_event(self.path, dict(event='pr', commit=self.sha, manual_verification=True,
                                     url='https://github.invalid/fixture/hello/pull/1'))
         with patch('herdworks.hc.get', return_value={'state': 'missing'}):

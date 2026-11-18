@@ -14,7 +14,7 @@
 11. Handle failed and inconclusive gates under rules 13 and 14 below.
 12. After reading an artifact, execute `hw reap` so finished sessions and verifier worktrees are cleared.
 
-13. On `FAIL` or `REJECTED`, start a fix round with `hw spawn`. The new builder must diagnose before it fixes. Allow at most three fix rounds after the first failed gate; then ask, with the diagnoses and a recommendation. If a later round fails on the same cause, treat it as a wrong assumption, not bad luck, and say so in the fix brief.
+13. On `FAIL` or `REJECTED`, execute `hw gate` so the refusal is recorded, then start a fix round with `hw spawn`. If the gate prints `ESCALATED`, the same reasons have refused more than one commit: start no worker, and ask with the repeated reasons, the diagnoses and a recommendation. The new builder must diagnose before it fixes. Allow at most three fix rounds after the first failed gate; then ask, with the diagnoses and a recommendation. If a later round fails on the same cause, treat it as a wrong assumption, not bad luck, and say so in the fix brief.
 14. Unless rule 28 applies, on `INCONCLUSIVE`, read its `Cause:` line. A `setup-bug` is yours to repair or retry once, and uses no fix round. An `external-prerequisite` stops the task: ask with the smallest action needed. For `ambiguous-evidence`, retry the verifier once, then ask.
 15. At every check-in execute `hw probe`. Replace a session marked `STALLED` at once with `hw spawn` and `--replaces`, after reading its screen for the cause. After two replacements of the same step, ask. A session that is waiting on you is not stalled; answer it.
 16. A worker whose status is `blocked` needs a person. Read its screen. If you cannot resolve it with a tool you are allowed to use, ask.
@@ -34,6 +34,8 @@
 27. When a task is held by a limit, name that limit in your REPLY and start it when a place frees. Reap completed sessions before retrying queued tasks.
 28. When a check cannot be proven because of the environment, not the code, do not retry it. Raise it in your outbox, then run `hw pr PROJECT TASK_ID --manual-verification` so the owner verifies it by hand. Never merge.
 29. When a message arrives, execute `hw tidy PROJECT` before anything else. It closes tasks whose pull request was merged or closed and clears stopped tasks' worktrees. Name any task it closed in your REPLY; if it reports a task it could not check, carry on and mention it.
+30. The gate also reads the verifier's `claims.json` and runs the Project's checks command when one is set. When it refuses over claims (missing, ungraded, unevidenced, or a verdict that does not follow from the grades), rerun the verifier once with `hw spawn PROJECT TASK_ID verify`; that uses no fix round. When it refuses because the checks command failed, start a fix round; the tool puts the output in the fix brief. With a checks command the gate takes as long as that command: give the call a long timeout and never interrupt it.
+31. When the user asks for an answer or a go/no-go rather than shipped behaviour (a spike, research, a feasibility check), add `--kind spike` to `hw task new`. A spike passes the gate with its findings graded and evidenced, even when one is `DISPROVED`. Never start a fix round to turn a no into a yes.
 
 For rule 28, read every BLOCKED-BY-ENVIRONMENT line and PASSED-OTHER-CHECKS in the latest
 verdict/review. Complete every check the environment permits. If the verifier's remaining
@@ -72,7 +74,7 @@ Read the latest numbered artifacts listed by events.jsonl and hw probe: build-N/
 Reap after each artifact; artifacts and verifier evidence survive in the task folder.
 A missing artifact is not completion even when a session is idle at turn 0.
 For BLOCKED, copy the decision into your own ask.md with your recommendation, evidence and risk.
-For FAIL or REJECTED, execute `hw spawn PROJECT TASK_ID fix` (three fixes maximum).
+For FAIL or REJECTED, execute `hw gate PROJECT TASK_ID`, then `hw spawn PROJECT TASK_ID fix` (three fixes maximum).
 For INCONCLUSIVE with BLOCKED-BY-ENVIRONMENT and PASSED-OTHER-CHECKS, follow rule 28 before any retry. Otherwise inspect Cause:/Ask: and follow rule 14; retry with `hw spawn PROJECT TASK_ID verify`.
 After an answer, read answers/ and resume the stopped step, usually verification.
 Only write ask.md while an answer is pending. Archive it under your task's asks/ when its answer arrives; never recreate it as a resolved note.

@@ -45,6 +45,21 @@ class RunCase(unittest.TestCase):
         return git(self.repo, "rev-parse", "HEAD")
 
 
+def write_claims(folder, *grades):
+    """Save claims.json beside a verdict: one claim per grade, each backed by a saved evidence file."""
+    (folder / 'evidence').mkdir(exist_ok=True)
+    claims = []
+    for number, grade in enumerate(grades or ('PROVED',), 1):
+        claim = dict(id=f'AC-{number}', grade=grade)
+        if grade == 'NOT_PROVED':
+            claim['reason'] = 'needs a device this machine lacks'
+        else:
+            (folder / f'evidence/ac{number}.txt').write_text('python3 hello.py Ada\nHello, Ada!\n')
+            claim.update(check='python3 hello.py Ada', evidence=f'../evidence/ac{number}.txt')
+        claims.append(claim)
+    (folder / 'claims.json').write_text(json.dumps(claims))
+
+
 class GateCase(RunCase):
     def setUp(self):
         super().setUp()
@@ -64,6 +79,7 @@ class GateCase(RunCase):
         os.utime(self.verdict, (now - 2, now - 2))
         (self.verify / 'evidence').mkdir()
         (self.verify / 'evidence/cli.txt').write_text('python3 hello.py Ada\nHello, Ada!\n')
+        write_claims(self.verify)
         (self.review / 'review.md').write_text('CONFIRMED\n')
         for role, address, start, metadata in [
                 ('build', 't2', now - 5, {}),
