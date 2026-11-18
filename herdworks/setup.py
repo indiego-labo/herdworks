@@ -217,7 +217,10 @@ def check_project(fix):
     folder = Path(ask('Where to keep its code', str(Path.home() / 'code' / repository.split('/')[-1]))).expanduser()
     if not folder.exists():
         folder.parent.mkdir(parents=True, exist_ok=True)
-        cloned = run('gh', 'repo', 'clone', repository, str(folder), '--', '--quiet')
+        # HTTPS with gh's sign-in works on every machine; gh's own clone follows its git_protocol
+        # setting, which may be SSH without a key.
+        cloned = run('git', '-c', 'credential.helper=', '-c', f"credential.helper=!{tool('gh')} auth git-credential",
+                     'clone', '--quiet', f'https://github.com/{repository}.git', str(folder))
         if cloned.returncode:
             todo('clone failed: ' + cloned.stderr.strip())
             return None
