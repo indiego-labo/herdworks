@@ -292,7 +292,16 @@ def main(argv=None):
         from .help import text
         print(text(), end="")
         return 0
-    args = parser.parse_args(argv)
+    words = list(sys.argv[1:] if argv is None else argv)
+    # Python 3.12+ drops a leading "--" before the command; 3.11 rejects it. Treat both alike.
+    args, extra = parser.parse_known_args(words[1:] if words[:1] == ["--"] else words)
+    # Python 3.11 argparse leaves an optional positional unfilled when an option sits before it
+    # (hw say P --task HE-2 "text"); 3.12+ fills it. Fill it the same way on every version.
+    slot = {"say": "text", "run": "text", "status": "project", "watch": "project"}.get(args.command)
+    if extra and slot and getattr(args, slot) is None and len(extra) == 1 and not extra[0].startswith("-"):
+        setattr(args, slot, extra.pop())
+    if extra:
+        parser.error("unrecognized arguments: " + " ".join(extra))
     try:
         # Starting a run and answering one are the owner's decisions, never an agent's. This is decided
         # from the parsed command, so no abbreviation or `--` spelling of the command line can skip it.
