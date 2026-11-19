@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -677,7 +678,8 @@ FP8_JOURNEYS = ('one-command',)
 
 def run_one_command(evidence, timeout, project_name):
     """hw run with real opencode workers: a verified branch from one command, live status and watch,
-    budget stops with a webhook, a detached resume, and messages to a closed or unknown task."""
+    token counts and budgets without cached input, budget stops with a webhook, a detached resume,
+    an answer sent while the task runs, and --task messages to a closed, unknown or finished task."""
     from http.server import BaseHTTPRequestHandler, HTTPServer
     import threading
     from herdworks.limits import ROLES
@@ -720,6 +722,15 @@ def run_one_command(evidence, timeout, project_name):
         verifiers = roles.count('verify')
         return verifiers in (1, 2) and roles == ['build'] * builds + ['verify'] * verifiers + ['evidence']
 
+    def spent_only(record):
+        """Every total is input + output + reasoning, and cached input stands beside it, in no total."""
+        counted = [worker['tokens'] for worker in record['sessions'] if isinstance(worker['tokens'], dict)]
+        used = record['tokens']
+        return (all(t['total'] == t['input'] + t['output'] + t['reasoning'] for t in counted)
+                and (not counted or (used['total'] == sum(t['total'] for t in counted)
+                                     and used['cached'] == sum(t['cache_read'] + t['cache_write'] for t in counted)
+                                     and used['includes_cached'] is False)))
+
     received = []
 
     class Hook(BaseHTTPRequestHandler):
@@ -750,7 +761,10 @@ def run_one_command(evidence, timeout, project_name):
         (evidence / 'config.txt').write_text(hw('config').stdout)
 
         log('\n## 1. One command to a verified branch, with status and watch during the run\n')
-        run_args = [ROOT / 'bin/hw', 'run', '-p', project_name, '--file', repo / 'briefs/shout.md']
+        # The budget sits far above what the task spends and far below what it reads from the cache,
+        # so the run only finishes if cached input is kept out of the count.
+        token_budget = 1000000
+        run_args = [ROOT / 'bin/hw', 'run', '-p', project_name, '--max-tokens', token_budget, '--file', repo / 'briefs/shout.md']
         log(f'```console\n$ hw {" ".join(map(str, run_args[1:]))}\n```\n\nIts output is printed below, after the status samples taken while it ran.')
         owner_commands.append(list(map(str, run_args[1:])))
         started = time.monotonic()
@@ -784,6 +798,7 @@ def run_one_command(evidence, timeout, project_name):
         log(f'\nOutput of `hw watch HE-1`, started while it ran (exit {watch_code}):\n\n```console\n{(evidence / "watch.txt").read_text().rstrip()}\n```')
         final = status('HE-1')
         save(evidence / 'final-HE-1.json', final)
+        shown = hw('status', 'HE-1').stdout
         gate_result = hw('gate', project_name, 'HE-1')
         (evidence / 'tasks-1.txt').write_text(hw('tasks', project_name).stdout)
         running = [item for item in samples if item['state'] == 'running']
@@ -805,7 +820,18 @@ def run_one_command(evidence, timeout, project_name):
             'elapsed rose while running': len(running) >= 2 and running[-1]['elapsed_seconds'] > running[0]['elapsed_seconds'],
             'every running sample named a last action once a worker existed': all(item['last_action'] for item in running if item['sessions']),
             'tokens were numbers or unknown, never anything else': all(isinstance(v, int) or v == 'unknown' for item in samples + [final]
-                                                                     for k, v in item['tokens'].items() if k != 'partial'),
+                                                                     for k, v in item['tokens'].items() if k not in ('partial', 'includes_cached')),
+            'tokens: every total is input+output+reasoning, cached input apart': all(spent_only(item) for item in samples + [final]),
+            'tokens: the agents reported a count and cached input for every role': (
+                all(isinstance(final['tokens'].get(role), int) for role in ('build', 'verify', 'evidence'))
+                and isinstance(final['tokens']['cached'], int) and final['tokens']['cached'] > 0),
+            'tokens: the budget held the spent count, which cached input alone would have broken': (
+                final['budget']['max_tokens'] == token_budget and isinstance(final['tokens']['total'], int)
+                and final['tokens']['total'] < token_budget < final['tokens']['total'] + final['tokens']['cached']),
+            'tokens: status prints cached input beside the count': (
+                f"tokens={final['tokens']['total']:,} cached={final['tokens']['cached']:,}" in shown),
+            'tokens: the webhook carries the same counts': any(b['event'] == 'done' and b['task'] == 'HE-1' and b['tokens'] == final['tokens']
+                                                              for b in received),
             'one builder, one evidence review, at most one verifier rerun, none left alive': ordered(final, builds=1) and live_workers('HE-1') == [],
             'webhook received done for HE-1': any(b['event'] == 'done' and b['task'] == 'HE-1' and b['commit'] == head for b in received),
             'product has the flag at the verified commit': '--shout' in product,
@@ -836,12 +862,22 @@ def run_one_command(evidence, timeout, project_name):
         save(evidence / 'blocked-HE-3.json', over)
         hw('status', 'HE-3')
         tokens_hook = next((b for b in received if b['event'] == 'budget' and b['task'] == 'HE-3'), None)
+        stopped_at = re.fullmatch(r'max_tokens budget reached: ([0-9,]+) of 1 tokens', over['reason'] or '')
+        tree = hw('status', project_name).stdout
         checks.update({
             'tokens: run exited 2': token_run.returncode == 2,
             'tokens: blocked on a count the agent reported': (over['state'] == 'blocked' and over['reason'].startswith('max_tokens budget reached')
                                                               and isinstance(over['tokens']['total'], int) and over['tokens']['total'] >= 1),
+            # The count in the reason was read just before the builder was stopped, so it can trail the final one;
+            # with cached input in it, it would be far above the spent total instead.
+            'tokens: the budget reason gives a spent count, without the cache': (
+                isinstance(over['tokens']['total'], int) and spent_only(over) and bool(stopped_at)
+                and 1 <= int(stopped_at[1].replace(',', '')) <= over['tokens']['total']),
             'tokens: no worker is left alive': live_workers('HE-3') == [],
             'tokens: webhook payload received': bool(tokens_hook) and tokens_hook['reason'] == over['reason'],
+            'plain status lists both blocked tasks with the reason and the resume command': all(
+                f'|-- {task} blocked ' in tree and f'|   |-- next: raise the budget and continue: hw run -p {project_name} --resume {task}' in tree
+                for task in ('HE-2', 'HE-3')) and '|   |-- reason: max_minutes budget reached' in tree and '|   |-- reason: max_tokens budget reached' in tree,
         })
         written = ''.join((project / 'tasks' / task / name).read_text() for task in ('HE-1', 'HE-2', 'HE-3') for name in ('events.jsonl', 'status.json'))
         checks['webhook URL and its token appear in no task record or output'] = (
@@ -849,38 +885,86 @@ def run_one_command(evidence, timeout, project_name):
         log('\nWebhook payloads the local listener has received so far (also in `webhook.jsonl`):\n\n```json\n'
             + '\n'.join(json.dumps(body, indent=1) for body in received) + '\n```')
 
-        log('\n## 3. The blocked task continues with its printed next step, detached, and watch follows it\n')
+        log('\n## 3. The blocked task continues detached; the owner adds a requirement while it runs\n')
         hw('run', '-p', project_name, '--resume', 'HE-2', '--max-minutes', '30', '--detach')
+        # Wait until the build is behind it: the answer then arrives while a verifier or the reviewer works.
+        waited = time.monotonic()
+        while True:
+            current = status('HE-2')
+            if current['state'] != 'running' or time.monotonic() - waited > timeout:
+                raise RuntimeError(f"HE-2 was {current['state']} at {current['stage']} before the answer could be sent while it ran")
+            if current['stage'] in ('verify', 'evidence'):
+                break
+            time.sleep(2)
+        added = ('One more requirement from the owner: also add a --wave flag. python3 hello.py --wave Ada must print exactly '
+                 'Bye for now, Ada! followed by a newline. Keep --farewell as it is and cover --wave in the unittest.')
+        said = hw('say', project_name, '--task', 'HE-2', added)
+        sent_at = time.time()
+        save(evidence / 'status-when-answered.json', current)
         watched = hw('watch', 'HE-2', expect=None)
         resumed = status('HE-2')
         save(evidence / 'final-HE-2.json', resumed)
+        hw('status', 'HE-2')
+        task = project / 'tasks/HE-2'
+        builders = [e for e in events(task) if e.get('event') == 'session' and e.get('role') == 'build']
+        (number,) = [m['number'] for m in inbox(project)]
+        briefs = {e['folder']: (task / e['folder'] / 'brief.md').read_text() for e in builders}
+        save(evidence / 'answer.json', dict(number=number, text=added, sent_at=sent_at, stage_when_sent=current['stage'],
+                                           builders=[dict(folder=e['folder'], started_at=e['started_at'], step=e.get('step'),
+                                                          round=e.get('round'), answers=e.get('answers'),
+                                                          brief_has_answer=added in briefs[e['folder']]) for e in builders]))
+        names = [worker['name'] for worker in resumed['sessions']]
+        after = [worker['role'] for worker in resumed['sessions'][names.index(builders[-1]['name']) + 1:]]
+        head = git(repo, 'rev-parse', 'refs/heads/hw/HE-2')
+        product = evidence / 'hello-with-the-answer.py'
+        product.write_text(git(repo, 'show', f'{head}:hello.py') + '\n')
+        waved = command(sys.executable, product, '--wave', 'Ada', check=False)
+        farewell = command(sys.executable, product, '--farewell', 'Ada', check=False)
+        log(f'\nThe product at the verified commit {head}:\n\n```console\n$ python3 hello.py --wave Ada\n{waved.stdout.rstrip()}\n'
+            f'$ python3 hello.py --farewell Ada\n{farewell.stdout.rstrip()}\n```')
         checks.update({
             'resume: watch exited 0': watched.returncode == 0,
-            'resume: done and verified': (resumed['state'], resumed['status']) == ('done', 'verified'),
-            'resume: the killed builder was replaced once and no fix round ran': ordered(resumed, builds=2),
+            'resume: done and verified at the branch head': (resumed['state'], resumed['status'], resumed['commit']) == ('done', 'verified', head),
+            'resume: the killed builder was replaced once and no fix round ran': (
+                [e.get('replaces') for e in builders[:2]] == [None, builders[0]['name']] and all(not e.get('round') for e in builders)),
             'resume: webhook received done for HE-2': any(b['event'] == 'done' and b['task'] == 'HE-2' for b in received),
+            'answer: say reports that a builder will read it before the task finishes': (
+                f'delivered {number} to HE-2: it is running and will not be done before a builder has read this' in said.stdout),
+            'answer: exactly one builder started after it, and only its brief carries it': (
+                len(builders) == 3 and [added in briefs[e['folder']] for e in builders] == [False, False, True]
+                and builders[2]['started_at'] > sent_at and builders[2].get('answers') == [number]),
+            'answer: verification started again after that builder and no other builder followed': (
+                after[:1] == ['verify'] and after[-1:] == ['evidence'] and 'build' not in after),
+            'answer: the verified commit does what it asked and keeps the first request': (
+                waved.stdout == 'Bye for now, Ada!\n' and farewell.stdout == 'Goodbye, Ada!\n'),
+            'answer: tokens of the longer task still exclude cached input': spent_only(resumed),
         })
 
-        log('\n## 4. A message to a closed or unknown task gets a clear answer\n')
+        log('\n## 4. A --task message to a closed, unknown or finished task gets a clear answer\n')
         hw('task', 'close', project_name, 'HE-1')
-        in_text = hw('say', project_name, 'HE-1 should also greet in French', expect=1)
         addressed = hw('say', project_name, '--task', 'HE-1', 'It should also greet in French', expect=1)
         unknown = hw('say', project_name, '--task', 'HE-99', 'Is this one done?', expect=1)
         finished = hw('say', project_name, '--task', 'HE-2', 'One more thing', expect=None)
         checks.update({
-            'closed in text: refused, says closed, names the next step': 'HE-1 is closed' in in_text.stderr and f'hw run -p {project_name}' in in_text.stderr,
-            'closed with --task: refused the same way': 'HE-1 is closed' in addressed.stderr and 'not delivered' in addressed.stderr,
+            'closed task: refused, says closed, names the next step': ('HE-1 is closed' in addressed.stderr and 'not delivered' in addressed.stderr
+                                                                      and f'hw run -p {project_name}' in addressed.stderr),
             'unknown task: refused, names hw tasks': 'HE-99 is not a task' in unknown.stderr and f'hw tasks {project_name}' in unknown.stderr,
             'finished run task: refused with the follow-up command': finished.returncode == 1 and 'HE-2 is finished' in finished.stderr,
-            'nothing was recorded and no coordinator was started': inbox(project) == [] and hc.get(coordinator_name(project)).get('state') == 'missing',
+            'the refused messages were not recorded and no coordinator was started': (
+                [(m['number'], m.get('task')) for m in inbox(project)] == [(number, 'HE-2')]
+                and hc.get(coordinator_name(project)).get('state') == 'missing'),
         })
+        checks['webhook: the four payloads arrived and none names a local folder'] = (
+            sorted((b['task'], b['event']) for b in received) == [('HE-1', 'done'), ('HE-2', 'budget'), ('HE-2', 'done'), ('HE-3', 'budget')]
+            and all(str(folder) not in json.dumps(b) for b in received for folder in (repo, repo.resolve(), hw_home(), Path.home())))
         save(evidence / 'webhook-received.json', received)
         save(evidence / 'checks.json', checks)
         log('\n## Checks\n\n' + '\n'.join(f'- {"PASS" if ok else "FAIL"}: {name}' for name, ok in checks.items()))
         failed = [name for name, ok in checks.items() if not ok]
         save(evidence / 'result.json', dict(result='FAIL' if failed else 'PASS', journey='one-command', failed=failed,
-             boundary='Real CLI, hc, git, gate and opencode/DeepSeek workers; disposable hello repository; local webhook listener. '
-                      'No GitHub remote, so opening a draft pull request from hw run is not exercised here.'))
+             boundary='Real CLI, hc, git, gate and opencode/DeepSeek workers; disposable hello repository; local webhook listener; '
+                      'the owner\'s mid-run answer is supplied by this harness. No GitHub remote, so opening a draft pull '
+                      'request from hw run is not exercised here (tests.test_run does it with a bare remote and a stand-in gh).'))
         if failed:
             raise RuntimeError('one-command checks failed: ' + '; '.join(failed))
     except Exception as error:
