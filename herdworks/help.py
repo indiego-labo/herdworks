@@ -38,7 +38,7 @@ def next_step():
     projects = sorted(p.name for p in (home / 'projects').glob('*') if (p / 'project.json').is_file())
     if projects:
         return (f'Your Projects: {", ".join(projects)}. '
-                f'Give one a task with `hw say {projects[0]} "..."`.')
+                f'Give one a task with `hw run -p {projects[0]} "..."`.')
     if not chosen_agents():
         return 'Next: run `hw setup` to choose a model and add your first Project.'
     return 'Next: run `hw setup` to add your first Project.'

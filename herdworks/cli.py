@@ -180,11 +180,11 @@ def main(argv=None):
     command = sub.add_parser('status', help='what is running; with a task id, that task\'s stage, elapsed time, '
                                             'tokens and last action')
     command.add_argument('project', nargs='?', metavar='PROJECT|TASK_ID')
-    command.add_argument('-p', dest='owner', metavar='PROJECT', help='the Project, when two share a task prefix')
+    command.add_argument('-p', dest='within', metavar='PROJECT', help='the Project, when two share a task prefix')
     command.add_argument('--json', action='store_true')
     command = sub.add_parser('watch', help='follow a task until it is done, blocked or failed')
     command.add_argument('project', nargs='?', metavar='TASK_ID', help='default: the newest open task')
-    command.add_argument('-p', dest='owner', metavar='PROJECT')
+    command.add_argument('-p', dest='within', metavar='PROJECT')
     command.add_argument('--json', action='store_true', help='print each status change as a JSON line')
     command = sub.add_parser('automations')
     command.add_argument('action', nargs='?', choices=['tick'])
@@ -297,12 +297,12 @@ def main(argv=None):
         if args.command in ('status', 'watch'):
             # A task id names its own Project, so the caller is checked against that Project.
             if args.project and TASK_ID.fullmatch(args.project):
-                target = find_task(args.project, args.owner)
+                target = find_task(args.project, args.within)
             elif args.command == 'watch':
                 if args.project:
                     raise ValueError('watch follows a task id such as HE-1')
-                target = newest_task(args.owner)
-            args.project = target.parents[1].name if target else args.project or args.owner
+                target = newest_task(args.within)
+            args.project = target.parents[1].name if target else args.project or args.within
         authorize(getattr(args, "project", None), getattr(args, "task", None) if args.command == "memory" else None,
                   args.command == "memory")
         if args.command == 'watch':
@@ -397,7 +397,9 @@ def main(argv=None):
             from .setup import setup
             return setup(check_only=args.check)
         elif args.command == "config":
-            print(json.dumps(config(), indent=2))
+            # A webhook URL can carry a secret, so its value is never printed.
+            print(json.dumps({name: "(set)" if name == "webhook" and value else value
+                              for name, value in config().items()}, indent=2))
         elif args.command == "project":
             if args.action == "add":
                 if args.github:
@@ -482,6 +484,8 @@ def main(argv=None):
                 for name in reap(path):
                     print(f"reaped {name}")
         return 0
+    except KeyboardInterrupt:
+        return 130
     except (OSError, ValueError, RuntimeError, KeyError) as error:
         print(f"hw: {error}", file=sys.stderr)
         return 1

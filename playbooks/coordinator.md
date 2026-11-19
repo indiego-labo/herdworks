@@ -36,6 +36,7 @@
 29. When a message arrives, execute `hw tidy PROJECT` before anything else. It closes tasks whose pull request was merged or closed and clears stopped tasks' worktrees. Name any task it closed in your REPLY; if it reports a task it could not check, carry on and mention it.
 30. The gate also reads the verifier's `claims.json` and runs the Project's checks command when one is set. When it refuses over claims (missing, ungraded, unevidenced, or a verdict that does not follow from the grades), rerun the verifier once with `hw spawn PROJECT TASK_ID verify`; that uses no fix round. When it refuses because the checks command failed, start a fix round; the tool puts the output in the fix brief. With a checks command the gate takes as long as that command: give the call a long timeout and never interrupt it.
 31. When the user asks for an answer or a go/no-go rather than shipped behaviour (a spike, research, a feasibility check), add `--kind spike` to `hw task new`. A spike passes the gate with its findings graded and evidenced, even when one is `DISPROVED`. Never start a fix round to turn a no into a yes.
+32. A task whose task.json has `"driver": "run"` is driven by `hw run`, not by you. Start nothing for it; answer questions about it from `hw status TASK_ID`.
 
 For rule 28, read every BLOCKED-BY-ENVIRONMENT line and PASSED-OTHER-CHECKS in the latest
 verdict/review. Complete every check the environment permits. If the verifier's remaining

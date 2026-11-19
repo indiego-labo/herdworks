@@ -104,6 +104,23 @@ paths for hc commands while opencode alone uses the real provider configuration/
 The helper preserves every attempt; a failed run is not proof. The driver owns parent/head
 regression and the independent Herdworks verdict.
 
+## One command (hw run)
+
+`one-command` needs no coordinator and uses the same lifecycle and scratch rules as the FP-3
+journeys (opencode with deepseek/deepseek-flash for every worker role, unsandboxed grant):
+
+```sh
+python3 .agents/skills/verify-herdworks/scripts/journey.py one-command \
+  --project onecmd --evidence /ABS/evidence/one-command
+```
+
+It takes about ten minutes: one full task, two forced budget stops, one detached resume and four
+refused messages. It starts its own webhook listener on 127.0.0.1 and writes `transcript.md`
+with every owner command, output and exit code. Inspect `checks.json`, `status-samples.jsonl`,
+`webhook.jsonl` and `cleanup.json`; see [features/one-command.md](features/one-command.md) for the
+required outcomes, the boundaries it does not cover and the short-budget gotcha. Cleanup also
+removes the detached driver terminal, which is labelled `hwrun=PROJECT:TASK` rather than `hw=`.
+
 ## FP-4 remote host
 
 Remote-converse runs on Linux through hc exec --on, with real opencode sessions

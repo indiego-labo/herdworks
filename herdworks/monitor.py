@@ -68,7 +68,7 @@ def timeline(path):
                 "run": event.get("action"), "pr": f"opened draft pull request {event.get('url')}",
                 "stop": "stopped its workers", "resumed": "resumed", "closed": "closed",
                 "escalated": f"escalated: the same refusal on {event.get('failures')} commits",
-                "stalled": f"{name} stalled"}.get(kind)
+                "stalled": f"{name} ended without its {ARTIFACT.get(event.get('step', '').split(':')[0], 'artifact')}"}.get(kind)
         if text:
             facts.append((at, text[:300]))
         if kind == "session" and event.get("role") in ARTIFACT:
@@ -81,8 +81,8 @@ def timeline(path):
 def sessions(path, now):
     """Each worker session: its role, agent, running time and the tokens its agent reports."""
     path = Path(path)
-    found = []
-    for event in events(path):
+    found, history = [], events(path)
+    for index, event in enumerate(history):
         role = event.get("role")
         if event.get("event") != "session" or role not in ARTIFACT:
             continue
@@ -90,7 +90,10 @@ def sessions(path, now):
         artifact = folder / ARTIFACT[role]
         live = bool(event.get("address")) and hc.get(event["address"]).get("state") == "live"
         finished = artifact_complete(folder, role)
-        end = artifact.stat().st_mtime if finished else now if live else max(newest_file(folder), event["started_at"])
+        # A worker that ended without its artifact ran until the next recorded event: its stop or replacement.
+        later = next((e.get("at") or e.get("started_at") for e in history[index + 1:] if e.get("at") or e.get("started_at")),
+                     max(newest_file(folder), event["started_at"]))
+        end = artifact.stat().st_mtime if finished else now if live else later
         used = tokens.read(event.get("agent"), folder / ("work" if role == "evidence" else "wt"))
         found.append(dict(name=event["name"], role=role, agent=event.get("agent") or "unknown", model=event.get("model"),
                           state="working" if live and not finished else "finished" if finished else "ended",
@@ -242,7 +245,8 @@ def render(current, now=None):
     """The record as text for a person."""
     now = time.time() if now is None else now
     lines = [headline(current), f"  request: {current['request']}"]
-    if current["last_action"]:
+    if current["last_action"] and not current["last_action"].startswith(current["state"] + ":"):
+        # A finished run's last action is its own result, which the result or reason line already gives.
         lines.append(f"  last: {current['last_action']} ({clock(max(0, now - current['last_action_at']))} ago)")
     lines.append(f"  branch: {current['branch']}" + (f" at {current['commit']}" if current["commit"] else ""))
     if current["pr_url"]:

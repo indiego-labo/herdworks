@@ -45,10 +45,10 @@ class RunScenario(RunCase):
     def setUp(self):
         super().setUp()
         (self.home / "config.json").write_text('{"max_worktrees": 20}')
-        self.live, self.killed, self.launched = set(), [], []
+        self.live, self.idle, self.killed, self.launched = set(), set(), [], []
         self.script = {"build": [], "verify": [], "evidence": []}
         for target, effect in (("launch", self.launch), ("get", self.get), ("call", self.call),
-                               ("sessions", lambda: [dict(address=name) for name in sorted(self.live)]),
+                               ("sessions", lambda: [dict(address=name) for name in sorted(self.live | self.idle)]),
                                ("require_owner", lambda: None)):
             patcher = patch(f"herdworks.hc.{target}", side_effect=effect)
             patcher.start()
@@ -61,7 +61,9 @@ class RunScenario(RunCase):
         if act == "hang":
             self.live.add(kwargs["name"])
         else:
+            # Like a real agent, it stays in its terminal, idle, after leaving its artifact.
             getattr(self, role)(cwd, act)
+            self.idle.add(kwargs["name"])
         return dict(address=kwargs["name"], name=kwargs["name"], first_message={"sent": True})
 
     def stamp(self, file):
@@ -92,8 +94,8 @@ class RunScenario(RunCase):
         self.stamp(work.parent / "review.md")
 
     def get(self, name):
-        if name in self.live:
-            return dict(state="live", status="working", address=name, name=name,
+        if name in self.live | self.idle:
+            return dict(state="live", status="working" if name in self.live else "idle", address=name, name=name,
                         labels=dict(hw=self.labels.get(name, "")))
         return dict(state="finished", address=name, name=name)
 
@@ -104,6 +106,7 @@ class RunScenario(RunCase):
     def call(self, *args):
         if args[0] == "kill":
             self.live.discard(args[1])
+            self.idle.discard(args[1])
             self.killed.append(args[1])
         return dict(text="last screen")
 
@@ -132,7 +135,9 @@ class OneCommandTests(RunScenario):
         self.assertIn("has not granted push, draft-pr", final["reason"])
         self.assertIsNone(final["pr_url"])
         self.assertEqual(inbox(self.project), [])
-        self.assertFalse((self.project / "coordinator.json").read_text().count("hw-unit-he-2"))
+        self.assertEqual((self.live | self.idle, len(self.killed)), (set(), 3))
+        self.assertEqual([e["passed"] for e in events(path) if e["event"] == "gate"], [True])
+        self.assertEqual(final["last_action"].split(":")[0], "done")
         self.assertEqual(json.loads((path / "status.json").read_text())["state"], "done")
 
     def test_cli_run_prints_progress_and_exits_zero_and_status_json_matches(self):
@@ -214,6 +219,28 @@ class OneCommandTests(RunScenario):
         self.assertEqual(final["state"], "failed")
         self.assertIn("launch outcome uncertain", final["reason"])
         self.assertIn("hw run -p unit --resume HE-2", final["next_step"])
+
+    def test_interrupt_leaves_workers_running_and_names_the_resume_command(self):
+        self.script["build"] = ["hang"]
+        path = drive.create(self.project, "Request")
+
+        def interrupt(seconds):
+            raise KeyboardInterrupt
+        final = drive.drive(path, interval=0, sleep=interrupt)
+        self.assertEqual(final["state"], "blocked")
+        self.assertIn("interrupted", final["reason"])
+        self.assertIn("hw run -p unit --resume HE-2", final["next_step"])
+        self.assertEqual((self.killed, self.live), ([], {"hw-unit-he-2-build-1"}))
+
+    def test_bad_budget_or_empty_request_creates_no_task(self):
+        for args in (["run", "-p", "unit", "--max-minutes", "0", "Request"], ["run", "-p", "unit", "--max-tokens", "-1", "Request"],
+                     ["run", "-p", "unit", "  "], ["run", "-p", "unit", "--resume", "HE-7"]):
+            with self.subTest(args=args):
+                code, _, err = self.hw(*args)
+                self.assertEqual(code, 1)
+                self.assertRegex(err, "positive number|say what you want|no task HE-7")
+        self.assertFalse((self.project / "tasks/HE-2").exists())
+        self.assertEqual(self.launched, [])
 
     def test_a_second_driver_and_a_coordinator_task_are_refused(self):
         with self.assertRaisesRegex(ValueError, "coordinator's task"):
@@ -308,6 +335,14 @@ class BudgetTests(RunScenario):
         self.set_project(webhook=failing.url)
         _, final = self.run_task()
         self.assertEqual((final["state"], final["webhook"]["detail"]), ("done", "HTTP 500"))
+
+    def test_config_output_never_prints_the_webhook_url(self):
+        (self.home / "config.json").write_text(json.dumps(dict(webhook=self.hook.url, max_minutes=45)))
+        code, out, _ = self.hw("config")
+        self.assertEqual((code, json.loads(out)["webhook"], json.loads(out)["max_minutes"]), (0, "(set)", 45))
+        self.assertNotIn("SECRET-TOKEN", out)
+        path = drive.create(self.project, "Request")
+        self.assertEqual(monitor.record(path)["budget"], {"max_minutes": 45, "max_tokens": None})
 
     def test_done_posts_the_webhook_with_branch_and_commit(self):
         self.set_project(webhook=self.hook.url)

@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from . import hc, monitor
 from .gate import blocked_requirements, check_gate, checks_command, claim_problems, environment_only, gate, reap, run_checks
-from .limits import budget, role_settings
+from .limits import role_settings
 from .pickup import stop
 from .pr import open_pr, recorded_pr
 from .probe import probe
@@ -54,12 +54,15 @@ def create(project, text, base=None, kind="build", max_minutes=None, max_tokens=
     for role in ("build", "verify", "evidence"):
         role_settings(project, role)
     extra = {"driver": "run"}
-    extra.update({name: value for name, value in (("max_minutes", max_minutes), ("max_tokens", max_tokens)) if value is not None})
+    for name, value in (("max_minutes", max_minutes), ("max_tokens", max_tokens)):
+        if value is not None:
+            if not value > 0:
+                raise ValueError(f"{name} must be a positive number")
+            extra[name] = value
     with tempfile.TemporaryDirectory(prefix="hw-run-") as folder:
         brief = Path(folder) / "brief.md"
         brief.write_text(text)
         path, _ = new_task(project, brief, base=base, kind=kind, extra=extra)
-    budget(path)
     now = time.time()
     monitor.write(path, state="running", stage="queued", pid=os.getpid(), active_seconds=0,
                   run_started_at=now, heartbeat_at=now, ended_at=None)
@@ -68,13 +71,14 @@ def create(project, text, base=None, kind="build", max_minutes=None, max_tokens=
 
 def set_budget(path, max_minutes=None, max_tokens=None):
     changes = {name: value for name, value in (("max_minutes", max_minutes), ("max_tokens", max_tokens)) if value is not None}
+    if any(not value > 0 for value in changes.values()):
+        raise ValueError("max_minutes and max_tokens must be positive numbers")
     if changes:
         with locked(path):
             data = dict(read_task(path), **changes)
             temporary = path / ".task.json.tmp"
             temporary.write_text(json.dumps(data, indent=2) + "\n")
             temporary.replace(path / "task.json")
-        budget(path)
 
 
 def start(path, role, replaces=None):
@@ -155,9 +159,6 @@ def advance(path, now=None):
     if is_stopped(path):
         return Step("blocked", last["role"] if last else "queued", reason="stopped: its workers were ended",
                     next_step=f"continue with: {say['resume']}")
-    passed, commit, _ = check_gate(path)
-    if passed:
-        return deliver(path, commit)
     raised = escalated(path)
     if raised:
         return raised

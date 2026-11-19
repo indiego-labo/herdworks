@@ -257,3 +257,17 @@ CLI output, draft body, fake-gh log, events, artifacts, messages and cleanup.
 The driver owns parent/head draft-pr regression, a real task on the remote host and independent
 Herdworks verification. Never call real gh, merge, or mistake this partial handoff
 for a VERIFIED task. Existing draft-pr remains the strict gate regression recipe.
+
+## One command (hw run)
+
+| Behavior | Proof | Outcome |
+| --- | --- | --- |
+| [One command to a verified branch](one-command.md) | one-command part 1 | exit 0, done/verified at the branch head, fresh gate VERIFIED, no coordinator, no nudge |
+| Live status and watch | one-command part 1 | samples show stage, rising elapsed, agent-reported tokens and last action while running; watch ends on done |
+| Budgets and webhook | one-command part 2; tests.test_run | max_minutes and max_tokens stop workers, blocked with reason, `budget` payload at a local listener; URL never recorded |
+| Resume and detach | one-command part 3 | blocked task continues detached with its printed next step and ends verified |
+| Messages naming a closed or unknown task | one-command part 4; tests.test_run | refused with reason and next step; nothing recorded |
+| Fix rounds, escalation, builder question, dead worker, draft pull request, Codex tokens | tests.test_run | fake agents and stand-ins only; not live |
+
+Evidence belongs under the caller's evidence root in `one-command/`. This is producer proof on the
+hello fixture with real opencode workers; an independent verdict for Herdworks stays with the driver.

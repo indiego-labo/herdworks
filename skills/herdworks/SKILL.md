@@ -5,10 +5,9 @@ description: Hand coding tasks to a Herdworks Project and follow them to a draft
 
 # Herdworks as your Bot
 
-Herdworks runs a coordinator per Project (one GitHub repository). It turns a message into a
-task, has one agent build it and others verify it, and ends with a draft pull request. You are
-the go-between: pass the user's words in, watch for replies, and report back. You do not
-build, verify or merge anything yourself.
+Herdworks takes a coding task for a Project (one GitHub repository), has one agent build it and
+others verify it, and ends with a draft pull request. You are the go-between: pass the user's
+words in, follow the task, and report back. You do not build, verify or merge anything yourself.
 
 ## Find where `hw` runs
 
@@ -20,48 +19,48 @@ build, verify or merge anything yourself.
 
 ## Give a Project a task
 
-1. Note the newest reply first, so nothing that arrives during sending is missed:
-   `last=$(hw read PROJECT --latest)`
-2. Send the user's request with their own words. Add a done check only if the user gave one or
-   agrees to yours; never add requirements they did not ask for:
-   `hw say PROJECT "THE USER'S REQUEST. Done when ..."`
-   If they want it based on another branch, add `--base BRANCH`; the draft pull request opens
-   against that branch. Several unrelated tasks can go in separate messages. Each gets an id
-   such as `MY-1`.
-3. Start waiting in the background (in Claude Code, run it as a background command so you are
-   told when it ends, and keep talking to the user meanwhile):
-   `hw wait PROJECT --since "$last" --timeout 3600`
-4. Tell the user it is handed over and that you will report when the Project replies.
+1. Start it with the user's own words. Add a done check only if the user gave one or agrees to
+   yours; never add requirements they did not ask for:
+   `hw run -p PROJECT --detach "THE USER'S REQUEST. Done when ..."`
+   It prints the task id, such as `MY-1`. If they want it based on another branch, add
+   `--base BRANCH`. If they gave a limit, add `--max-minutes N` or `--max-tokens N`.
+2. Follow it in the background (in Claude Code, run it as a background command so you are told
+   when it ends, and keep talking to the user meanwhile):
+   `hw watch MY-1`
+3. Tell the user it is handed over and that you will report when it ends.
 
-## When `hw wait` ends
+## When `hw watch` ends
 
-It prints each new reply as its number, then the reply. The first line of each reply is its kind:
+Its last lines are the task's status record. The exit code and `state` say how it ended:
 
-| Kind | What to do |
-| --- | --- |
-| `REPLY` | Progress or an acknowledgement. Summarise it in one line for the user. |
-| `QUESTION` | The coordinator needs a decision. Show the user the question and its options in plain words. Send their answer, unchanged, with `hw say PROJECT "..."`. Never answer a product question on the user's behalf. |
-| `DONE` | The task finished. Report its status and the pull request address. If it says `needs manual verification`, tell the user exactly what they need to check by hand. |
-| `PROBLEM` | Something needs the owner (an automation switched itself off, a limit was hit). Report it as written. |
-
-Then run `hw wait PROJECT --since NEWEST_NUMBER --timeout 3600` again while any task is still
-open (`hw tasks PROJECT` shows them). Exit code 2 means the timeout passed with no reply: check
-`hw tasks PROJECT`, and wait again if work is still running.
+| State | Exit | What to do |
+| --- | --- | --- |
+| `done` | 0 | Report the `result` line: the draft pull request address, or the verified branch and commit. If it says `needs manual verification`, tell the user exactly what to check by hand. |
+| `blocked` | 2 | Show the user the `reason` and the `next` line as written. For a question, send their answer unchanged with `hw say PROJECT --task MY-1 "..."`, which resumes the task, then `hw watch MY-1` again. For a budget, ask before raising it with `hw run -p PROJECT --resume MY-1 --max-minutes N`. Never answer a product question on the user's behalf. |
+| `failed` | 1 | Report the `reason`. `hw run -p PROJECT --resume MY-1 --detach` continues once the cause is fixed. |
 
 ## Checking in
 
-- `hw tasks PROJECT`: each task, its status (`in progress`, `waiting on you`, `escalated`,
+- `hw status MY-1`: stage, elapsed time, tokens per role (`unknown` when the agent reports none),
+  last action and branch or pull request. `hw status MY-1 --json` for the same as JSON.
+- `hw status`: every open task and the live agents; `hc attach NAME` lets the user watch one.
+- `hw tasks PROJECT`: each task and its status (`in progress`, `waiting on you`, `escalated`,
   `for review`, `needs manual verification`, `verified`, `stopped`) and its pull request.
-  `escalated` means the same check failed on repeated builds and the coordinator's QUESTION
-  needs the user's decision before any more work starts.
-- `hw read PROJECT --since N`: replies after number N.
-- `hw status`: the live agents; `hc attach NAME` lets the user watch one.
+
+## Conversations with a coordinator
+
+`hw say PROJECT "..."` instead hands a message to the Project's coordinator agent, which can
+plan several tasks from one message and answer status questions. Note `last=$(hw read PROJECT
+--latest)` first, send, then wait with `hw wait PROJECT --since "$last" --timeout 3600`. Each
+reply starts with its kind: `REPLY` (progress), `QUESTION` (show it to the user and send their
+answer unchanged with `hw say`), `DONE` (report the pull request) or `PROBLEM` (report it as
+written). A message naming a closed or unknown task is refused with the next step; follow it.
 
 ## Limits
 
 - Never merge, close or approve pull requests, push to branches, or edit files under
   `~/.herdworks`. The user reviews and merges.
-- To stop a task, send the user's request to the coordinator (`hw say PROJECT "Stop MY-1"`).
+- To stop a task: `hw stop PROJECT MY-1`.
 - How workers build and verify is set by house rules (`hw rules`); suggest the user edits them
   with `hw rules copy NAME [--project PROJECT]` when they want work done differently.
 - `hw skills [--project PROJECT]` shows which skills workers can load and flags a house rule that
