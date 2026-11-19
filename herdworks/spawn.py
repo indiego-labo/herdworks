@@ -11,7 +11,7 @@ from .memory import brief as memory_brief
 from .pickup import remove_worktree
 from .probe import progress_time
 from . import rules
-from .runs import ROOT, append_event, built_commit, events, first_line, git, locked, newest_artifact, read_task, coordinator_task, task_key, is_stopped, coordinator, ARTIFACT, artifact_complete, escalation, write_journal
+from .runs import ROOT, answered_since, answers, append_event, built_commit, events, first_line, git, locked, newest_artifact, read_task, coordinator_task, task_key, is_stopped, coordinator, ARTIFACT, artifact_complete, escalation, write_journal
 
 
 def record_launch(path, result, *, name, role, folder, stuck_after, program=None, **metadata):
@@ -29,10 +29,19 @@ def spike_brief(path, root=ROOT):
     return (root / "briefs/spike.md").read_text() if read_task(path).get("kind") == "spike" else ""
 
 
+def saved_answers(path):
+    """The answers a brief quotes, oldest first, as (number, text)."""
+    if read_task(path).get("driver") == "run":
+        # No coordinator vouches for the files in answers/, so the owner's own messages are quoted.
+        return [(number, text) for number, _, text in answers(path)]
+    files = sorted((coordinator_task(path) / "answers").glob("*.md"), key=lambda p: int(p.stem))
+    return [(int(file.stem), file.read_text()) for file in files]
+
+
 def build_brief(path, root=ROOT):
     sources = [root / "briefs/build.md", path / "brief.md", coordinator_task(path) / "intent.md"]
-    answers = sorted((coordinator_task(path) / "answers").glob("*.md"), key=lambda p: int(p.stem))
-    parts = [f"--- {source.name} ---\n{source.read_text()}" for source in sources + answers]
+    parts = [f"--- {source.name} ---\n{source.read_text()}" for source in sources]
+    parts += [f"--- {number}.md ---\n{text}" for number, text in saved_answers(path)]
     parts.insert(1, spike_brief(path, root) + rules.text("build", path.parents[1]))
     return "\n\n".join(parts) + "\n"
 
@@ -88,7 +97,7 @@ def stale_review(previous, verdict):
 
 
 def answer_text(path):
-    return "\n\n".join(p.read_text() for p in sorted((coordinator_task(path) / "answers").glob("*.md"), key=lambda p: int(p.stem)))
+    return "\n\n".join(text for _, text in saved_answers(path))
 
 
 def fix_brief(path, round_number, root):
@@ -243,8 +252,11 @@ def spawn(path, role="build", root=ROOT, replaces=None):
         artifact = newest_artifact(path, 'verify-*/verdict.md' if role == 'verify' else 'evidence-*/review.md')
         artifact_session = next((e for e in reversed(history) if e.get('event') == 'session'
                                  and artifact and e.get('folder') == artifact.parent.name), None)
+        builder = next((e for e in reversed(history) if e.get("event") == "session" and e.get("role") == "build"), {})
+        # A builder that reported after that verdict or review was written makes it one about earlier work.
         if (role in ('verify', 'evidence') and artifact and artifact_session
                 and artifact_session.get('commit') == built_commit(path)
+                and artifact_session.get('started_at', 0) >= builder.get('started_at', 0)
                 and artifact_session.get('launch_source') == 'template' and environment_only(artifact)):
             raise ValueError('requirement blocked by environment; do not retry; use pr --manual-verification')
         from .limits import config
@@ -307,15 +319,21 @@ def spawn(path, role="build", root=ROOT, replaces=None):
             step = f"build:rewind:{rewind['at']}" if previous else "build:0"
         else:
             step = f"{worker_role}:{commit}"
-            if previous and previous.get("commit") == commit:
+            if worker_role == "verify" and str(builder.get("step", "")).startswith("build:rewind"):
+                # A builder restarted with the owner's answer may report the commit it found. That commit is
+                # then verified against the answer too: a step of its own, not a repeat of an earlier verifier.
+                step += f":{builder['folder']}"
+            if previous and previous.get("commit") == commit and previous.get("step", step) == step:
                 artifact = path / previous["folder"] / ARTIFACT[worker_role]
                 if not artifact_complete(artifact.parent, worker_role):
                     raise RuntimeError(f"worker already started as {previous['name']}; inspect its artifact")
                 if worker_role == "verify" and (first_line(artifact) == "INCONCLUSIVE"
                                                 or claim_problems(artifact.parent, data.get("kind"))):
                     cause = next((line for line in artifact.read_text().splitlines() if line.startswith("Cause:")), "")
-                    if cause == "Cause: external-prerequisite" and not any(
-                            p.stat().st_mtime > artifact.stat().st_mtime for p in (coordinator_task(path) / "answers").glob("*.md")):
+                    # For a `hw run` task the files in answers/ are copies; only the owner's own messages count.
+                    answered = (answered_since(path, artifact.stat().st_mtime) if data.get("driver") == "run" else any(
+                        p.stat().st_mtime > artifact.stat().st_mtime for p in (coordinator_task(path) / "answers").glob("*.md")))
+                    if cause == "Cause: external-prerequisite" and not answered:
                         raise ValueError("external prerequisite requires a new answer after this verdict; ask the user")
                     attempts = [e for e in workers if e.get("step") == step and not e.get("replaces")]
                     if len(attempts) >= 2 and cause != "Cause: external-prerequisite":
@@ -331,16 +349,25 @@ def spawn(path, role="build", root=ROOT, replaces=None):
             raise ValueError("evidence review requires the newest recorded verifier's PASS verdict")
         if worker_role == "evidence" and (problems := claim_problems(verdict.parent, data.get("kind"))):
             raise ValueError("evidence review requires usable claims; rerun the verifier: " + "; ".join(problems))
-        brief = None
+        brief = quoted = None
         if worker_role == "build":
+            # Read before the brief is written, so every number recorded here is certainly quoted in it.
+            quoted = [number for number, _ in saved_answers(path)]
             if target:
-                brief = (path / target["folder"] / "brief.md").read_text()
+                brief, quoted = (path / target["folder"] / "brief.md").read_text(), target.get("answers", [])
             elif role != "fix" and previous and previous.get("round"):
                 # A build restarted by an answer during a fix round keeps that round's brief and its findings.
                 brief = ((path / previous["folder"] / "brief.md").read_text()
                          + f"\n--- answers given since ---\n{answer_text(path)}\n")
             else:
                 brief = fix_brief(path, round_number, root) if role == "fix" else build_brief(path, root)
+            head = built_commit(path)
+            if role != "fix" and not target and previous and head:
+                # The answer came after a builder had finished: its successor continues that work.
+                brief += (f"\n--- continuing ---\nThe branch already holds the work of the builder before you, at commit {head}.\n"
+                          "The owner's answers in this brief arrived after it was built; the newest is last.\n"
+                          "Change what they call for and keep what still holds. If nothing needs to change,\n"
+                          f"make no commit and report READY {head}.\n")
         if target:
             replace_session(path, target)
         if worker_role == "build" and previous:
@@ -376,7 +403,8 @@ def spawn(path, role="build", root=ROOT, replaces=None):
                         stuck_after=data.get("stuck_after_minutes", DEFAULT_STUCK[worker_role]),
                         program=program, commit=commit, **settings,
                         round=round_number, step=step, replaces=replaces,
-                        verifier=verifier["name"] if worker_role == "evidence" else None)
+                        verifier=verifier["name"] if worker_role == "evidence" else None,
+                        **({"answers": quoted} if worker_role == "build" else {}))
         setup = dict(name=name, role=worker_role, folder=folder.name, cwd_name=cwd_name,
                      folder_existed=folder.exists(), metadata=metadata)
         if worker_role == "build" and not workers:

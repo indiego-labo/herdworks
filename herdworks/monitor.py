@@ -81,6 +81,7 @@ def timeline(path):
                 "gate": "gate VERIFIED" if event.get("passed") else "gate REFUSED: " + "; ".join(event.get("reasons", [])),
                 "run": event.get("action"), "pr": f"opened draft pull request {event.get('url')}",
                 "stop": "stopped its workers", "resumed": "resumed", "closed": "closed",
+                "rewind": "answer " + ", ".join(map(str, event.get("answers", []))) + " is handed to a new builder",
                 "escalated": f"escalated: the same refusal on {event.get('failures')} commits",
                 "stalled": f"{name} ended without its {ARTIFACT.get(event.get('step', '').split(':')[0], 'artifact')}"}.get(kind)
         if text:
@@ -117,17 +118,25 @@ def sessions(path, now):
 
 
 def token_summary(workers):
-    """Tokens per role and in total. A number is a sum of what agents reported; nothing is estimated."""
-    summary, partial = {}, False
+    """Tokens per role and in total. A number is a sum of what agents reported; nothing is estimated.
+
+    The totals are input, output and reasoning tokens, which is what a token budget is held to.
+    `cached` is the cache reads and writes reported beside them, never added in. `includes_cached`
+    says a Codex session is in the totals: Codex reports one figure that has cached input in it."""
+    summary, partial, cached, mixed = {}, False, None, False
     for worker in workers:
         role, used = worker["role"], worker["tokens"]
         if used == "unknown":
             partial = True
             summary.setdefault(role, "unknown")
-        else:
-            summary[role] = used["total"] + (summary[role] if isinstance(summary.get(role), int) else 0)
+            continue
+        summary[role] = used["total"] + (summary[role] if isinstance(summary.get(role), int) else 0)
+        if "cache_read" in used:
+            cached = (cached or 0) + used["cache_read"] + used["cache_write"]
+        mixed = mixed or bool(used.get("includes_cached"))
     known = [value for value in summary.values() if isinstance(value, int)]
-    return dict(summary, total=sum(known) if known else "unknown", partial=partial)
+    return dict(summary, total=sum(known) if known else "unknown", partial=partial,
+                cached="unknown" if cached is None else cached, includes_cached=mixed)
 
 
 def record(path, now=None):
@@ -208,7 +217,9 @@ def over_budget(path, current=None):
         return f"max_minutes budget reached: {minutes:.1f} of {limits['max_minutes']:g} minutes"
     total = current["tokens"]["total"]
     if limits["max_tokens"] and isinstance(total, int) and total >= limits["max_tokens"]:
-        return f"max_tokens budget reached: {total:,} of {limits['max_tokens']:,} tokens"
+        return (f"max_tokens budget reached: {total:,} of {limits['max_tokens']:,} tokens"
+                + (" (the count has Codex's figure in it, which includes cached input)"
+                   if current["tokens"]["includes_cached"] else ""))
     return None
 
 
@@ -246,15 +257,20 @@ def clock(seconds):
     return f"{hours}h{minutes:02}m" if hours else f"{minutes}m{seconds:02}s"
 
 
-def count(value):
-    return f"{value:,}" if isinstance(value, int) else "unknown"
+def spent(used):
+    """Token counts as text, for a task's summary or one session: the total, with cached input beside it."""
+    if not isinstance(used, dict) or not isinstance(used["total"], int):
+        return "tokens=unknown"
+    cached = used.get("cached", used["cache_read"] + used["cache_write"] if "cache_read" in used else None)
+    return (f"tokens={used['total']:,}" + (" (some unknown)" if used.get("partial") else "")
+            + ((" (with Codex's figures, which count cached input)" if "partial" in used else
+                " (Codex's figure, cached input included)") if used.get("includes_cached") else "")
+            + (f" cached={cached:,}" if isinstance(cached, int) else ""))
 
 
 def headline(current):
-    used = current["tokens"]
-    some = " (some unknown)" if used["partial"] and isinstance(used["total"], int) else ""
     return (f"{current['task']} {current['state']} stage={current['stage']} "
-            f"elapsed={clock(current['elapsed_seconds'])} tokens={count(used['total'])}{some}")
+            f"elapsed={clock(current['elapsed_seconds'])} {spent(current['tokens'])}")
 
 
 def line(current):
@@ -277,10 +293,9 @@ def render(current, now=None):
     if limits:
         lines.append("  budget: " + ", ".join(limits))
     for worker in current["sessions"]:
-        used = worker["tokens"]
         model = f" {worker['model']}" if worker.get("model") else ""
         lines.append(f"  {worker['role']:<8} {worker['agent']}{model} {clock(worker['seconds'])} "
-                     f"tokens={count(used['total'] if isinstance(used, dict) else None)} {worker['state']}"
+                     f"{spent(worker['tokens'])} {worker['state']}"
                      + (f"  hc attach {worker['name']}" if worker["live"] else ""))
     if current["reason"]:
         lines.append(f"  {'result' if current['state'] == 'done' else 'reason'}: {current['reason']}")

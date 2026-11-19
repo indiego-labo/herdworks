@@ -18,8 +18,8 @@ from .pickup import stop
 from .pr import open_pr, recorded_pr
 from .probe import probe
 from .projects import new_task, read_project
-from .runs import (ARTIFACT, ROOT, answered_since, append_event, artifact_complete, built_commit, coordinator_task,
-                   escalation, events, first_line, is_stopped, locked, newest_artifact, read_task, task_key)
+from .runs import (ARTIFACT, ROOT, append_event, artifact_complete, built_commit, coordinator_task,
+                   escalation, events, first_line, is_stopped, locked, newest_artifact, read_task, task_key, unheard)
 from .spawn import spawn
 
 SETTLE = 20  # seconds a live worker gets to end its turn after its artifact appears
@@ -38,6 +38,7 @@ class Step:
     next_step: str = None
     wait: bool = False
     retry: tuple = None  # the (role, replaces) a limit is holding back; only that start is tried again
+    answers: list = None  # the answers this step tried to hand to a new builder
 
 
 def commands(path):
@@ -100,7 +101,22 @@ def set_budget(path, max_minutes=None, max_tokens=None):
             temporary.replace(path / "task.json")
 
 
+def restart(path, numbers):
+    """Start a builder that continues the branch with every answer so far in its brief."""
+    append_event(path, {"event": "rewind", "at": time.time(), "answers": numbers})
+    step = start(path, "build")
+    step.answers = numbers
+    if step.state == "blocked":
+        step.reason += ("; answer " + ", ".join(map(str, numbers)) + " is saved and goes to a builder when the task continues")
+    return step
+
+
 def start(path, role, replaces=None):
+    # A stalled or dead worker is still replaced first: replacing is what ends its session.
+    late = unheard(path) if role in ("verify", "evidence") and not replaces else None
+    if late:
+        # The owner said something no builder has read. A builder gets it before anything more is verified.
+        return restart(path, late)
     stage = "build" if role == "fix" else role
     try:
         spawn(path, role, replaces=replaces)
@@ -117,7 +133,7 @@ def deliver(path, commit, manual=False):
     """End a task the gate passed: a draft pull request when the Project grants it, else the verified branch."""
     data = read_task(path)
     name, task = data["project"], data["id"]
-    where = f"commit {commit} on branch {data['branch']} in {data['repo']}"
+    where = f"commit {commit} on branch {data['branch']}"  # no local path: the reason is sent to the webhook
     grants = read_project(path.parents[1]).get("grants", {})
     missing = [grant for grant in ("push", "draft-pr") if grants.get(grant) is not True]
     flag = " --manual-verification" if manual else ""
@@ -206,18 +222,21 @@ def advance(path, now=None):
     opening = first_line(artifact)
     if role == "build":
         if opening == "BLOCKED":
-            if answered_since(path, artifact.stat().st_mtime):
-                append_event(path, {"event": "rewind", "at": time.time()})
-                return start(path, "build")  # a held start is retried by the loop, so one answer rewinds once
+            # Once the owner has answered, the run restarts a builder with the answer instead of ending here.
             question = " ".join(artifact.read_text().splitlines()[1:2]) or f"see {artifact}"
             return Step("blocked", "build", reason=f"the builder needs a decision: {question}", next_step=say["answer"])
         commit = built_commit(path)
         if not commit:
             return Step("blocked", "build", reason=f"the builder reported READY, but not for a new head of {data['branch']}",
                         next_step=f"read {artifact}; {say['inspect']}")
-        if any(e.get("role") == "verify" and e.get("commit") == commit for e in workers):
-            return Step("blocked", "build", reason=f"the fix builder reported READY without a new commit; {commit} "
+        if (any(e.get("role") == "verify" and e.get("commit") == commit for e in workers)
+                and any(e.get("role") == "build" and e.get("round") and e.get("commit") == commit
+                        and not str(e.get("step")).startswith("build:rewind") for e in workers)):
+            # A fix round was started from this very commit, and no builder since has moved past it.
+            return Step("blocked", "build", reason=f"the builder reported READY without a new commit; {commit} "
                         "was already refused", next_step=f"read {artifact}; {say['inspect']}")
+        # A builder restarted with an answer may change nothing. Its commit, which no fix round was
+        # asked to replace, is then verified again: this time against the answer too.
         checked = any(e.get("event") == "run" and e.get("checked") == commit for e in history)
         if checks_command(path.parents[1]) and not checked:
             # Checks cost no tokens, so they run before a verifier is spent on the commit.
@@ -272,16 +291,26 @@ def _drive(path, interval, announce, sleep):
     monitor.write(path, state="running", stage=stage, reason=None, next_step=None, pid=os.getpid(),
                   active_seconds=banked, run_started_at=started, heartbeat_at=time.time(), ended_at=None)
 
-    def finish(step, kind=None):
-        now = time.time()
-        monitor.note(path, f"{step.state}: {step.reason}")
-        monitor.write(path, state=step.state, stage=step.stage, reason=step.reason, next_step=step.next_step, pid=None,
-                      active_seconds=banked + now - started, run_started_at=None, heartbeat_at=now, ended_at=now)
+    def finish(step, kind=None, carry=False):
+        """Save the end state and announce it; returns (None, the final record).
+
+        With `carry`, answers no builder has read keep the task going instead: their numbers are returned
+        and nothing is saved. `hw say --task` saves an answer under the same lock, so none can arrive
+        between this look and the saved end state. A stopped or escalated task starts no builder, so
+        it ends as it is; the answer stays saved for when it continues."""
+        with locked(path):
+            late = unheard(path) if carry and not is_stopped(path) and not escalation(path) else []
+            if late:
+                return late, None
+            now = time.time()
+            monitor.note(path, f"{step.state}: {step.reason}")
+            monitor.write(path, state=step.state, stage=step.stage, reason=step.reason, next_step=step.next_step, pid=None,
+                          active_seconds=banked + now - started, run_started_at=None, heartbeat_at=now, ended_at=now)
         monitor.notify(path, monitor.record(path), kind or step.state)
         current = monitor.record(path)
         if announce:
             announce(current)
-        return current
+        return None, current
 
     shown = pending = None
     try:
@@ -293,13 +322,18 @@ def _drive(path, interval, announce, sleep):
             if spent:
                 stop(path)
                 return finish(Step("blocked", stage, reason=spent, next_step="raise the budget and continue: "
-                                   f"{say['resume']} --max-minutes N (or --max-tokens N)"), "budget")
+                                   f"{say['resume']} --max-minutes N (or --max-tokens N)"), "budget")[1]
             # While a limit holds a start back, only that start is tried again: the gate and the checks
             # that led to it are not run once more on every turn.
             step = start(path, *pending) if pending else advance(path)
+            while step.state != "running":
+                # The task may not end, done or blocked, on an answer no builder has read: a builder is
+                # restarted with it. If that builder cannot start, the task ends with the reason why.
+                late, final = finish(step, carry=not step.answers)
+                if not late:
+                    return final
+                step = restart(path, late)
             stage, pending = step.stage, step.retry
-            if step.state != "running":
-                return finish(step)
             if step.action and step.action != shown:
                 monitor.note(path, step.action)
             shown = step.action
@@ -308,10 +342,10 @@ def _drive(path, interval, announce, sleep):
                 sleep(interval)
     except KeyboardInterrupt:
         return finish(Step("blocked", stage, reason="hw run was interrupted; workers it started keep working",
-                           next_step=f"continue with: {say['resume']}"))
+                           next_step=f"continue with: {say['resume']}"))[1]
     except Exception as error:
         return finish(Step("failed", stage, reason=f"{type(error).__name__}: {error}",
-                           next_step=f"fix the cause, then continue with: {say['resume']}"))
+                           next_step=f"fix the cause, then continue with: {say['resume']}"))[1]
 
 
 def detach(path):
@@ -320,8 +354,12 @@ def detach(path):
     data = read_task(path)
     drivable(path)
     before = monitor.saved(path)
-    if monitor.driven(path):
-        raise ValueError(f"{data['id']} is already being driven; follow it with: hw watch {data['id']}")
+    leaving = time.monotonic() + 20
+    while monitor.driven(path):
+        # A run that has saved its end state is on its way out; sending its webhook can take ten seconds.
+        if before.get("state") == "running" or time.monotonic() > leaving:
+            raise ValueError(f"{data['id']} is already being driven; follow it with: hw watch {data['id']}")
+        time.sleep(0.2)
     name = f"hw-{data['project']}-{data['id'].lower()}-run"[:32]
     # The label key differs from the workers' `hw` label, so stopping the task's workers never ends its driver.
     result = hc.call("run", "--bg", "--json", "--no-parent", "--name", name, "--cwd", path,

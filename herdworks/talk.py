@@ -1,11 +1,12 @@
 import json
-import re
 import shlex
 import time
 from . import hc
 from .limits import role_settings
+from .monitor import saved
+from .pr import recorded_pr
 from .projects import read_project, task_paths
-from .runs import ROOT, coordinator_task, events, locked, read_task, write_journal
+from .runs import ROOT, coordinator_task, derive_status, events, locked, read_task, write_journal
 from .spawn import reconcile
 
 
@@ -80,56 +81,41 @@ def inbox(project):
     return [json.loads(line) for line in (project / "inbox.jsonl").read_text().splitlines() if line]
 
 
-def route(project, text, task=None, new=False):
-    """Where an owner's message goes: a task folder `hw run` drives, or None for the coordinator.
+def route(project, task):
+    """Where an owner's `--task` message goes: the folder of a task `hw run` drives, or None for the coordinator.
 
     Called before anything is recorded. A message nothing would act on is refused with the next
-    step, so it is never saved and then ignored."""
-    name = project.name
-    prefix = read_project(project)["prefix"]
+    step, so it is never saved and then ignored. Only `--task` routes: a message that merely
+    mentions a task id in its text goes to the coordinator as written."""
+    name = read_project(project)["name"]
     known = {item.parent.name: item.parent for item in task_paths(project)}
-    follow = f'Next step: start a follow-up task with: hw run -p {name} "..."'
-
-    def reach(task_id):
-        if task_id not in known:
-            raise ValueError(f"{task_id} is not a task of Project {name}, so this message was not delivered. "
-                             f"Next step: list its tasks with: hw tasks {name}")
-        closed = next((e for e in events(known[task_id]) if e.get("event") == "closed"), None)
-        if closed:
-            why = f" ({closed['reason']})" if closed.get("reason") else ""
-            raise ValueError(f"{task_id} is closed{why}, so nothing would act on this message and it was not "
-                             f"delivered. {follow}")
-        return known[task_id]
-
-    if task:
-        path = reach(task)
-        if read_task(path).get("driver") != "run":
-            return None
-        from .monitor import record
-        current = record(path)
-        if current["state"] == "done":
-            raise ValueError(f"{task} is finished ({current['status']}), so this message was not delivered. {follow}")
-        return path
-    if not new:
-        for task_id in dict.fromkeys(re.findall(rf"\b{re.escape(prefix)}-[1-9][0-9]*\b", text or "")):
-            try:
-                path = reach(task_id)
-            except ValueError as error:
-                raise ValueError(f"{error}, or send it to the coordinator as written with --new") from None
-            if read_task(path).get("driver") == "run":
-                raise ValueError(f"{task_id} is driven by hw run, not by the coordinator, so this message was not "
-                                 f'delivered. Next step: send it to that task with: hw say {name} --task {task_id} "..."')
-    return None
+    if task not in known:
+        raise ValueError(f"{task} is not a task of Project {name}, so this message was not delivered. "
+                         f"Next step: list its tasks with: hw tasks {name}")
+    closed = next((e for e in events(known[task]) if e.get("event") == "closed"), None)
+    if closed:
+        why = f" ({closed['reason']})" if closed.get("reason") else ""
+        raise ValueError(f"{task} is closed{why}, so nothing would act on this message and it was not "
+                         f'delivered. Next step: start a follow-up task with: hw run -p {name} "..."')
+    return known[task] if read_task(known[task]).get("driver") == "run" else None
 
 
 def answer(project, path, text):
-    """Record the owner's message as an answer for a task `hw run` drives; its next worker brief carries it."""
+    """Record the owner's message as an answer for a task `hw run` drives; a builder's brief will carry it.
+
+    The task's lock is held while it is saved. `hw run` saves a task's end state under the same lock,
+    after looking for answers no builder has read, so an answer is either seen by the running task
+    or saved after its end state, where the caller sees that state and resumes the task."""
     if not text or not text.strip():
         raise ValueError("message must not be empty")
-    with locked(project):
+    with locked(project), locked(path):
+        if saved(path).get("state") == "done" or recorded_pr(path):
+            raise ValueError(f"{path.name} is finished ({derive_status(path)}), so this message was not delivered. "
+                             f'Next step: start a follow-up task with: hw run -p {project.name} "..."')
         number = max((m["number"] for m in inbox(project)), default=0) + 1
         with (project / "inbox.jsonl").open("a") as stream:
             stream.write(json.dumps(dict(number=number, text=text, at=time.time(), task=path.name)) + "\n")
+        # A copy for people and for the workers that read the task's notes; the inbox entry is the answer.
         folder = coordinator_task(path) / "answers"
         folder.mkdir(parents=True, exist_ok=True)
         (folder / f"{number}.md").write_text(text)

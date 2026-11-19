@@ -36,14 +36,18 @@ Its last lines are the task's status record. The exit code and `state` say how i
 | State | Exit | What to do |
 | --- | --- | --- |
 | `done` | 0 | Report the `result` line: the draft pull request address, or the verified branch and commit. If it says `needs manual verification`, tell the user exactly what to check by hand. |
-| `blocked` | 2 | Show the user the `reason` and the `next` line as written. For a question, send their answer unchanged with `hw say PROJECT --task MY-1 "..."`, which resumes the task, then `hw watch MY-1` again. For a budget, ask before raising it with `hw run -p PROJECT --resume MY-1 --max-minutes N`. Never answer a product question on the user's behalf. |
+| `blocked` | 2 | Show the user the `reason` and the `next` line as written. For a question, send their answer unchanged with `hw say PROJECT --task MY-1 "..."`, which resumes the task, then `hw watch MY-1` again. If that command says the answer is saved but the task was not resumed, do not send it again: run the resume command it prints. For a budget, ask before raising it with `hw run -p PROJECT --resume MY-1 --max-minutes N`. Never answer a product question on the user's behalf. |
 | `failed` | 1 | Report the `reason`. `hw run -p PROJECT --resume MY-1 --detach` continues once the cause is fixed. |
 
 ## Checking in
 
-- `hw status MY-1`: stage, elapsed time, tokens per role (`unknown` when the agent reports none),
+- `hw status MY-1`: stage, elapsed time, tokens per role (input, output and reasoning; `cached=`
+  is shown beside them and is not part of the count; `unknown` when the agent reports none),
   last action and branch or pull request. `hw status MY-1 --json` for the same as JSON.
-- `hw status`: every open task and the live agents; `hc attach NAME` lets the user watch one.
+- `hw status`: every open task and the live agents; a blocked task shows its reason and the
+  command to continue. `hc attach NAME` lets the user watch one.
+- The user adds or corrects something while a task runs: send it unchanged with
+  `hw say PROJECT --task MY-1 "..."`. The task hands it to a builder before it can be done.
 - `hw tasks PROJECT`: each task and its status (`in progress`, `waiting on you`, `escalated`,
   `for review`, `needs manual verification`, `verified`, `stopped`) and its pull request.
 
@@ -54,7 +58,7 @@ plan several tasks from one message and answer status questions. Note `last=$(hw
 --latest)` first, send, then wait with `hw wait PROJECT --since "$last" --timeout 3600`. Each
 reply starts with its kind: `REPLY` (progress), `QUESTION` (show it to the user and send their
 answer unchanged with `hw say`), `DONE` (report the pull request) or `PROBLEM` (report it as
-written). A message naming a closed or unknown task is refused with the next step; follow it.
+written). A message sent with `--task` to a closed, finished or unknown task is refused with the next step; follow it.
 
 ## Limits
 

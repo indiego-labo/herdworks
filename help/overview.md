@@ -10,8 +10,8 @@ it works, and you get a draft pull request (or a verified branch) with the proof
     hw status TASK                                   stage, elapsed, tokens, last action, branch or pull request
     hw watch [TASK]                                  follow a task until it ends
     hw run -p PROJECT --resume TASK                  continue a blocked or interrupted task
-    hw say PROJECT --task TASK "your decision"       answer a blocked task; it resumes
-    hw status                                        what is running now
+    hw say PROJECT --task TASK "your decision"       answer a blocked task (it resumes), or tell a running one more
+    hw status                                        every open task; a blocked one shows why and what to run
     hc attach NAME                                   watch an agent live (names from hw status)
 
 Budgets: add --max-minutes N or --max-tokens N to hw run. --json on run, status and watch.

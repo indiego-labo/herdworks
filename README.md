@@ -49,16 +49,20 @@ or check it from anywhere:
 ```sh
 hw status MY-1       # stage, elapsed time, tokens per role, last action, branch or pull request
 hw watch MY-1        # follow it until it is done, blocked or failed
-hw status            # everything that is running
+hw status            # every open task; a blocked one shows its reason and the command to continue
 ```
 
 Add `--json` to `hw status`, `hw watch` or `hw run` for scripts. Tokens are the agents' own
-counts; when an agent reports none, the status says `unknown` rather than guess.
+counts of input, output and reasoning; cached input is shown beside them and never added in.
+When an agent reports none, the status says `unknown` rather than guess.
+
+Thought of something while it runs? `hw say myapp --task MY-1 "also keep the old flag"` hands it
+to a builder before the task can be done.
 
 Keep a task from running away with a budget, per task or per Project:
 
 ```sh
-hw run -p myapp --max-minutes 60 --max-tokens 20000000 "..."
+hw run -p myapp --max-minutes 60 --max-tokens 2000000 "..."
 ```
 
 When a budget is hit, `hw run` stops the task's agents and marks it blocked with the reason.
@@ -88,8 +92,6 @@ hw tasks myapp       # every task and its status
 ```
 
 If a task needs a decision from you, `hw read` shows the question; answer with `hw say`.
-A message that names a closed or unknown task is refused with the next step instead of being
-left unanswered.
 
 ## How hw works
 

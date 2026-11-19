@@ -5,7 +5,7 @@ import time
 from urllib.parse import urlsplit
 from .gate import check_gate, blocked_requirements, read_claims
 from .projects import read_project
-from .runs import append_event, events, first_line, git, is_stopped, locked, newest_artifact, read_task
+from .runs import append_event, events, first_line, git, is_stopped, locked, newest_artifact, read_task, unheard
 
 
 def recorded_pr(path):
@@ -102,6 +102,10 @@ def open_pr(path, manual_verification=False, title=None):
             raise ValueError("pull request already opened or creation outcome uncertain; inspect task events")
         if is_stopped(path):
             raise ValueError("task is stopped")
+        if data.get("driver") == "run" and unheard(path):
+            # `hw say --task` saves an answer under the locks held here, so this look cannot miss one.
+            raise ValueError(f"the owner's answer has not reached a builder yet; continue the task with: "
+                             f"hw run -p {data['project']} --resume {data['id']}")
         passed, commit, reasons = check_gate(path, manual_verification=manual_verification)
         if not passed:
             raise ValueError("gate refused: " + "; ".join(reasons))

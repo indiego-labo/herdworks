@@ -179,7 +179,8 @@ def main(argv=None):
     command.add_argument('--base', help='branch to start from instead of the Project base')
     command.add_argument('--kind', choices=['build', 'spike'], default='build')
     command.add_argument('--max-minutes', type=float, help='stop the task after this much running time')
-    command.add_argument('--max-tokens', type=int, help='stop the task once its agents report this many tokens')
+    command.add_argument('--max-tokens', type=int, help='stop the task once its agents report this many input, output '
+                                                         'and reasoning tokens (cached input is not counted)')
     command.add_argument('--detach', action='store_true', help='run in the background; follow with hw watch')
     command.add_argument('--json', action='store_true', help='print each status change as a JSON line')
     command = sub.add_parser('status', help='what is running; with a task id, that task\'s stage, elapsed time, '
@@ -246,9 +247,8 @@ def main(argv=None):
     command.add_argument("--file", type=Path)
     command.add_argument("--number", type=int, help="redeliver an existing message number")
     command.add_argument("--base", help="start this task from another branch instead of the Project base")
-    command.add_argument("--task", metavar="TASK_ID", help="send it to this task: an answer a blocked hw run task waits for")
-    command.add_argument("--new", action="store_true",
-                         help="send to the coordinator as written, even if it names a closed or unknown task")
+    command.add_argument("--task", metavar="TASK_ID", help="send it to this task; a hw run task gives it to a builder "
+                                                           "and, if it was blocked, resumes")
     command = sub.add_parser("read")
     command.add_argument("project")
     command.add_argument("--since", type=int, default=0)
@@ -297,6 +297,7 @@ def main(argv=None):
     args, extra = parser.parse_known_args(words[1:] if words[:1] == ["--"] else words)
     # Python 3.11 argparse leaves an optional positional unfilled when an option sits before it
     # (hw say P --task HE-2 "text"); 3.12+ fills it. Fill it the same way on every version.
+    # parse_intermixed_args would do this, but it raises TypeError on a parser with subcommands (3.11 and 3.13).
     slot = {"say": "text", "run": "text", "status": "project", "watch": "project"}.get(args.command)
     if extra and slot and getattr(args, slot) is None and len(extra) == 1 and not extra[0].startswith("-"):
         setattr(args, slot, extra.pop())
@@ -433,16 +434,24 @@ def main(argv=None):
                 raise ValueError("use text or --file")
             text = args.file.read_text() if args.file else args.text
             project = project_path(args.project)
-            # A redelivery was routed when it was first sent.
-            target = route(project, text, args.task, args.new) if args.number is None else None
+            # Only --task routes a message to a task. A redelivery was routed when it was first sent.
+            target = route(project, args.task) if args.task and args.number is None else None
             if target:
                 from . import drive
                 number = answer(project, target, text)
+                watch = f"Follow it with: hw watch {target.name}"
                 if monitor.record(target)["state"] == "running":
-                    print(f"delivered {number} to {target.name}: its next worker brief carries it")
+                    print(f"delivered {number} to {target.name}: it is running and will not be done before a builder "
+                          f"has read this. {watch}")
                 else:
-                    drive.detach(target)
-                    print(f"delivered {number} to {target.name} and resumed it. Follow it with: hw watch {target.name}")
+                    try:
+                        drive.detach(target)
+                    except (OSError, ValueError, RuntimeError) as error:
+                        # The answer is saved; sending it again would save a second copy.
+                        raise RuntimeError(f"answer {number} is saved for {target.name}, but the task was not resumed: "
+                                           f"{error}. Do not send it again; continue with: "
+                                           f"{drive.commands(target)['resume']}") from None
+                    print(f"delivered {number} to {target.name} and resumed it. {watch}")
             else:
                 number, repeat = say(project, text, args.number, base=args.base, about=args.task)
                 print(f"delivered {number}" + (" repeat" if repeat else ""))

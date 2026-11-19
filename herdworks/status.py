@@ -3,7 +3,7 @@ import time
 from . import hc, monitor
 from .home import hw_home
 from .projects import project_path, read_project, task_paths
-from .runs import derive_status, events
+from .runs import events
 from .talk import coordinator_name, status_word
 from .probe import newest_file
 
@@ -33,12 +33,20 @@ def tree(project=None, now=None):
             task = metadata.parent
             if any(e.get('event') == 'closed' for e in events(task)):
                 continue
-            state = derive_status(task)
-            if state == 'stopped':
-                continue
             current = monitor.record(task, now)
-            yield (f"|-- {task.name} {state} stage={current['stage']} "
-                   f"elapsed={monitor.clock(current['elapsed_seconds'])} tokens={monitor.count(current['tokens']['total'])}")
+            if current['driver'] == 'run':
+                # `hw run` keeps the task's state itself: blocked on a question, a budget or a stop, it waits
+                # on the owner, so it is shown with the reason and the command that continues it.
+                yield '|-- ' + monitor.headline(current)
+                for name, text in (('result' if current['state'] == 'done' else 'reason', current['reason']),
+                                   ('next', current['next_step'])):
+                    if text:
+                        yield f'|   |-- {name}: {text}'
+            elif current['status'] == 'stopped':
+                continue
+            else:
+                yield (f"|-- {task.name} {current['status']} stage={current['stage']} "
+                       f"elapsed={monitor.clock(current['elapsed_seconds'])} {monitor.spent(current['tokens'])}")
             for event in events(task):
                 if event.get('event') != 'session' or event.get('role') == 'coordinator':
                     continue

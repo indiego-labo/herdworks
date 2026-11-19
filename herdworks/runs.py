@@ -93,19 +93,35 @@ def escalation(path):
     return event if event and not answered_since(path, event['at']) else None
 
 
-def answered_since(path, asked_at):
-    notes = coordinator_task(path)
+def answers(path):
+    """The owner's answers to a task, oldest first, as (number, time, text).
+
+    A coordinator saves an answer it accepted as answers/N.md in its own folder; that counts while it
+    matches the owner's numbered message. A task `hw run` drives has no coordinator to vouch for those
+    files, so its answers are read from the inbox alone: the messages the owner addressed to it with
+    `hw say --task`. Agent sessions cannot write the inbox, and only the owner may call that command."""
     inbox = Path(path).parents[1] / 'inbox.jsonl'
-    messages = {m['number']: m for line in inbox.read_text().splitlines() if line
-                for m in [json.loads(line)]}
-    # A task `hw run` drives takes answers only from `hw say --task`, which the owner alone may call.
-    addressed = Path(path).name if read_task(path).get('driver') == 'run' else None
-    for answer in (notes / 'answers').glob('*.md'):
-        message = messages.get(int(answer.stem)) if answer.stem.isdecimal() else None
-        if (message and message['at'] > asked_at and (not addressed or message.get('task') == addressed)
-                and answer.read_text().strip() == message['text'].strip()):
-            return True
-    return False
+    messages = [json.loads(line) for line in inbox.read_text().splitlines() if line]
+    if read_task(path).get('driver') == 'run':
+        return [(m['number'], m['at'], m['text']) for m in messages if m.get('task') == Path(path).name]
+    saved = {int(p.stem): p.read_text() for p in (coordinator_task(path) / 'answers').glob('*.md') if p.stem.isdecimal()}
+    return [(m['number'], m['at'], m['text']) for m in messages
+            if m['number'] in saved and saved[m['number']].strip() == m['text'].strip()]
+
+
+def answered_since(path, asked_at):
+    return any(at > asked_at for _, at, _ in answers(path))
+
+
+def unheard(path):
+    """Numbers of the owner's answers that the newest builder's brief does not carry.
+
+    Each builder's session record lists the answers its brief quoted. Before the first builder
+    there is nothing to miss: its brief will quote them all."""
+    builder = next((e for e in reversed(events(path)) if e.get('event') == 'session' and e.get('role') == 'build'), None)
+    if builder is None:
+        return []
+    return [number for number, _, _ in answers(path) if number not in builder.get('answers', [])]
 
 
 def derive_status(path):
