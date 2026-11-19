@@ -45,6 +45,12 @@ def append_event(path, event):
         stream.write(json.dumps(event, sort_keys=True) + "\n")
 
 
+def write_journal(marker, data):
+    temporary = marker.with_suffix(".tmp")
+    temporary.write_text(json.dumps(data) + "\n")
+    temporary.replace(marker)
+
+
 @contextmanager
 def locked(path):
     with (Path(path) / ".lock").open("a") as stream:
@@ -123,7 +129,7 @@ def derive_status(path):
 
 def is_stopped(path):
     return next((e["event"] == "stop" for e in reversed(events(path))
-                 if e.get("event") in ("stop", "session")), False)
+                 if e.get("event") in ("stop", "session", "resumed")), False)
 
 
 ARTIFACT = {"build": "report.md", "verify": "verdict.md", "evidence": "review.md"}

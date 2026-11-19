@@ -116,7 +116,10 @@ def require_owner():
 
 def owner_mutation(argv):
     return (argv[:2] in (['automation', 'add'], ['automation', 'on'], ['automation', 'off'],
-                         ['automations', 'tick'], ['project', 'grant']))
+                         ['automations', 'tick'], ['project', 'grant'])
+            # Starting a run and answering one are the owner's decisions, never an agent's.
+            or argv[:1] == ['run']
+            or (argv[:1] == ['say'] and any(a == '--task' or a.startswith('--task=') for a in argv)))
 
 
 def forward(entrypoint, argv):

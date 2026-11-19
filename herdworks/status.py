@@ -1,6 +1,6 @@
 import json
 import time
-from . import hc
+from . import hc, monitor
 from .home import hw_home
 from .projects import project_path, read_project, task_paths
 from .runs import derive_status, events
@@ -36,7 +36,9 @@ def tree(project=None, now=None):
             state = derive_status(task)
             if state == 'stopped':
                 continue
-            yield f'|-- {task.name} {state}'
+            current = monitor.record(task, now)
+            yield (f"|-- {task.name} {state} stage={current['stage']} "
+                   f"elapsed={monitor.clock(current['elapsed_seconds'])} tokens={monitor.count(current['tokens']['total'])}")
             for event in events(task):
                 if event.get('event') != 'session' or event.get('role') == 'coordinator':
                     continue

@@ -11,7 +11,7 @@ from .memory import brief as memory_brief
 from .pickup import remove_worktree
 from .probe import progress_time
 from . import rules
-from .runs import ROOT, append_event, built_commit, events, first_line, git, locked, newest_artifact, read_task, coordinator_task, task_key, is_stopped, coordinator, ARTIFACT, artifact_complete, escalation
+from .runs import ROOT, append_event, built_commit, events, first_line, git, locked, newest_artifact, read_task, coordinator_task, task_key, is_stopped, coordinator, ARTIFACT, artifact_complete, escalation, write_journal
 
 
 def record_launch(path, result, *, name, role, folder, stuck_after, program=None, **metadata):
@@ -113,12 +113,6 @@ def fix_brief(path, round_number, root):
             "\n\n".join(failed) + "\nEarlier reports and diagnoses:\n" +
             "\n\n".join(p.read_text() for p in reports) +
             "\nIf a later round repeats a cause, test the underlying assumption and reconsider the design.\n")
-
-
-def write_journal(marker, data):
-    temporary = marker.with_suffix(".tmp")
-    temporary.write_text(json.dumps(data) + "\n")
-    temporary.replace(marker)
 
 
 def release_claim(data, setup, delete_branch=False):
@@ -238,6 +232,10 @@ def spawn(path, role="build", root=ROOT, replaces=None):
         if escalation(path):
             raise ValueError("task is escalated: the gate refused it repeatedly for the same reason; "
                              "ask the user and start nothing until they answer")
+        from .monitor import over_budget
+        spent = over_budget(path)
+        if spent:
+            raise ValueError(f"{spent}; start no worker: the owner raises the budget or stops the task")
         from .pr import recorded_pr
         pr = recorded_pr(path)
         if pr and pr.get('manual_verification') and pr['commit'] == built_commit(path):
@@ -256,8 +254,9 @@ def spawn(path, role="build", root=ROOT, replaces=None):
         reason = hold_reason(path, worker_role, replacing=replaces)
         if reason:
             raise ValueError(f'queued: {reason}')
-        parent_session = coordinator(path)
-        if not parent_session:
+        # A task started by `hw run` is driven by that command and has no coordinator above it.
+        parent_session = {} if data.get("driver") == "run" else coordinator(path)
+        if not parent_session and data.get("driver") != "run":
             raise ValueError("Project has no recorded coordinator")
         worker_role = "build" if role == "fix" else role
         settings = role_settings(path.parents[1], worker_role)
@@ -411,7 +410,7 @@ def spawn(path, role="build", root=ROOT, replaces=None):
                 template += "-opencode"
             result = hc.launch(name=name, cwd=cwd, template=template,
                                task=str(folder / "brief.md") if program else f"Read {folder / 'brief.md'} in full and do what it says.",
-                               identity=task_key(path), role=worker_role, parent=parent_session["address"], program=program)
+                               identity=task_key(path), role=worker_role, parent=parent_session.get("address"), program=program)
         except (FileNotFoundError, PermissionError):
             rollback_setup(path, marker, setup)
             raise

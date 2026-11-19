@@ -1,11 +1,12 @@
 import json
+import re
 import shlex
 import time
 from . import hc
 from .limits import role_settings
 from .projects import read_project, task_paths
-from .runs import ROOT, locked
-from .spawn import reconcile, write_journal
+from .runs import ROOT, coordinator_task, events, locked, read_task, write_journal
+from .spawn import reconcile
 
 
 def status_word(session):
@@ -79,7 +80,63 @@ def inbox(project):
     return [json.loads(line) for line in (project / "inbox.jsonl").read_text().splitlines() if line]
 
 
-def say(project, text=None, number=None, root=ROOT, delivery_key=None, base=None):
+def route(project, text, task=None, new=False):
+    """Where an owner's message goes: a task folder `hw run` drives, or None for the coordinator.
+
+    Called before anything is recorded. A message nothing would act on is refused with the next
+    step, so it is never saved and then ignored."""
+    name = project.name
+    prefix = read_project(project)["prefix"]
+    known = {item.parent.name: item.parent for item in task_paths(project)}
+    follow = f'Next step: start a follow-up task with: hw run -p {name} "..."'
+
+    def reach(task_id):
+        if task_id not in known:
+            raise ValueError(f"{task_id} is not a task of Project {name}, so this message was not delivered. "
+                             f"Next step: list its tasks with: hw tasks {name}")
+        closed = next((e for e in events(known[task_id]) if e.get("event") == "closed"), None)
+        if closed:
+            why = f" ({closed['reason']})" if closed.get("reason") else ""
+            raise ValueError(f"{task_id} is closed{why}, so nothing would act on this message and it was not "
+                             f"delivered. {follow}")
+        return known[task_id]
+
+    if task:
+        path = reach(task)
+        if read_task(path).get("driver") != "run":
+            return None
+        from .monitor import record
+        current = record(path)
+        if current["state"] == "done":
+            raise ValueError(f"{task} is finished ({current['status']}), so this message was not delivered. {follow}")
+        return path
+    if not new:
+        for task_id in dict.fromkeys(re.findall(rf"\b{re.escape(prefix)}-[1-9][0-9]*\b", text or "")):
+            try:
+                path = reach(task_id)
+            except ValueError as error:
+                raise ValueError(f"{error}, or send it to the coordinator as written with --new") from None
+            if read_task(path).get("driver") == "run":
+                raise ValueError(f"{task_id} is driven by hw run, not by the coordinator, so this message was not "
+                                 f'delivered. Next step: send it to that task with: hw say {name} --task {task_id} "..."')
+    return None
+
+
+def answer(project, path, text):
+    """Record the owner's message as an answer for a task `hw run` drives; its next worker brief carries it."""
+    if not text or not text.strip():
+        raise ValueError("message must not be empty")
+    with locked(project):
+        number = max((m["number"] for m in inbox(project)), default=0) + 1
+        with (project / "inbox.jsonl").open("a") as stream:
+            stream.write(json.dumps(dict(number=number, text=text, at=time.time(), task=path.name)) + "\n")
+        folder = coordinator_task(path) / "answers"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{number}.md").write_text(text)
+    return number
+
+
+def say(project, text=None, number=None, root=ROOT, delivery_key=None, base=None, about=None):
     data = read_project(project)
     if text is not None and not text.strip():
         raise ValueError("message must not be empty")
@@ -109,6 +166,8 @@ def say(project, text=None, number=None, root=ROOT, delivery_key=None, base=None
                 raise ValueError("message text is required")
             number = max((m["number"] for m in messages), default=0) + 1
             entry = dict(number=number, text=text, at=time.time())
+            if about is not None:
+                entry["task"] = about
             if base is not None:
                 entry["base"] = base
             if delivery_key is not None:
@@ -124,7 +183,8 @@ def say(project, text=None, number=None, root=ROOT, delivery_key=None, base=None
             raise ValueError("coordinator identity does not match this Project")
         for attempt in range(4):
             try:
-                hc.call("send", current["address"], f"MESSAGE {number}\n{entry['text']}")
+                heading = f"MESSAGE {number}" + (f" about {entry['task']}" if entry.get("task") else "")
+                hc.call("send", current["address"], f"{heading}\n{entry['text']}")
                 break
             except hc.HCError as error:
                 if attempt == 3 or "still starting" not in str(error) or "nothing was typed" not in str(error):
