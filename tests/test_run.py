@@ -623,6 +623,41 @@ class MidRunAnswerTests(RunScenario):
         (call,) = self.gh_calls()
         self.assertEqual(call["args"][-2:], ["--label", "needs-manual-verification"])
 
+    def test_a_no_change_answer_after_a_replaced_fix_builder_is_verified_again_not_called_refused(self):
+        # The fix builder commits and dies; its replacement reports that commit, which then passes.
+        self.script["build"] = ["ok", "commit-hang", "noop", "noop"]
+        self.script["verify"] = ["fail", "hang", "ok"]
+        path = drive.create(self.project, "Make hello greet.")
+        said = []
+
+        def tick(seconds):
+            self.live.discard("hw-unit-he-2-build-2")
+            if "hw-unit-he-2-verify-2" in self.live and not said:
+                with patch("herdworks.drive.detach"):
+                    said.append(self.hw("say", "unit", "--task", "HE-2", "Yes, that is right.")[0])
+                self.finish_worker(path, "verify-2")
+        final = drive.drive(path, interval=0, sleep=tick)
+        self.assertEqual([launch["role"] for launch in self.launched],
+                         ["build", "verify", "build", "build", "verify", "build", "verify", "evidence"])
+        self.assertEqual((said, final["state"], final["status"]), ([0], "done", "verified"))
+        self.assertEqual(final["commit"], (path / "build-3/report.md").read_text().split()[1])
+        self.assertIn("Yes, that is right.", (path / "build-4/brief.md").read_text())
+
+    def test_a_coordinator_task_still_refuses_to_verify_an_environment_blocked_commit_again(self):
+        (self.notes / "intent.md").write_text("DONE CHECK")
+        self.script["verify"] = ["environment"]
+        self.script["build"] = ["ok", "hang"]
+        for role in ("build", "verify", "evidence"):
+            spawn(self.path, role)
+            self.idle.clear()
+        (self.path / "evidence-1/review.md").write_text("REJECTED\nFinding: proof is thin\n")
+        from herdworks.gate import gate
+        self.assertFalse(gate(self.path)[0])
+        spawn(self.path, "fix")
+        with self.assertRaisesRegex(ValueError, "blocked by environment; do not retry"):
+            spawn(self.path, "verify")
+        self.assertEqual([launch["role"] for launch in self.launched], ["build", "verify", "evidence", "build"])
+
     def test_a_stalled_verifier_is_still_ended_when_an_answer_waits_for_a_builder(self):
         self.script["verify"] = ["hang", "ok"]
         path = drive.create(self.project, "Make hello greet.")

@@ -231,8 +231,8 @@ def advance(path, now=None):
                         next_step=f"read {artifact}; {say['inspect']}")
         if (any(e.get("role") == "verify" and e.get("commit") == commit for e in workers)
                 and any(e.get("role") == "build" and e.get("round") and e.get("commit") == commit
-                        and not str(e.get("step")).startswith("build:rewind") for e in workers)):
-            # A fix round was started from this very commit, and no builder since has moved past it.
+                        and not e.get("replaces") and not str(e.get("step")).startswith("build:rewind") for e in workers)):
+            # A fix round was opened on this very commit, and no builder since has moved past it.
             return Step("blocked", "build", reason=f"the builder reported READY without a new commit; {commit} "
                         "was already refused", next_step=f"read {artifact}; {say['inspect']}")
         # A builder restarted with an answer may change nothing. Its commit, which no fix round was

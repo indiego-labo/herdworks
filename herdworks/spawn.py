@@ -253,10 +253,12 @@ def spawn(path, role="build", root=ROOT, replaces=None):
         artifact_session = next((e for e in reversed(history) if e.get('event') == 'session'
                                  and artifact and e.get('folder') == artifact.parent.name), None)
         builder = next((e for e in reversed(history) if e.get("event") == "session" and e.get("role") == "build"), {})
-        # A builder that reported after that verdict or review was written makes it one about earlier work.
-        if (role in ('verify', 'evidence') and artifact and artifact_session
+        # A builder restarted with the owner's answer after that verdict or review makes it one about earlier
+        # work: the answer may be what unblocks it, so the commit is verified again.
+        answered = str(builder.get('step', '')).startswith('build:rewind') and (
+            artifact_session or {}).get('started_at', 0) < builder['started_at']
+        if (role in ('verify', 'evidence') and artifact and artifact_session and not answered
                 and artifact_session.get('commit') == built_commit(path)
-                and artifact_session.get('started_at', 0) >= builder.get('started_at', 0)
                 and artifact_session.get('launch_source') == 'template' and environment_only(artifact)):
             raise ValueError('requirement blocked by environment; do not retry; use pr --manual-verification')
         from .limits import config
@@ -331,9 +333,9 @@ def spawn(path, role="build", root=ROOT, replaces=None):
                                                 or claim_problems(artifact.parent, data.get("kind"))):
                     cause = next((line for line in artifact.read_text().splitlines() if line.startswith("Cause:")), "")
                     # For a `hw run` task the files in answers/ are copies; only the owner's own messages count.
-                    answered = (answered_since(path, artifact.stat().st_mtime) if data.get("driver") == "run" else any(
+                    provided = (answered_since(path, artifact.stat().st_mtime) if data.get("driver") == "run" else any(
                         p.stat().st_mtime > artifact.stat().st_mtime for p in (coordinator_task(path) / "answers").glob("*.md")))
-                    if cause == "Cause: external-prerequisite" and not answered:
+                    if cause == "Cause: external-prerequisite" and not provided:
                         raise ValueError("external prerequisite requires a new answer after this verdict; ask the user")
                     attempts = [e for e in workers if e.get("step") == step and not e.get("replaces")]
                     if len(attempts) >= 2 and cause != "Cause: external-prerequisite":
