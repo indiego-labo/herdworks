@@ -37,7 +37,10 @@ the verified local branch. Each turn it reads the task's records and does the on
 they call for with the same tools the coordinator uses (`spawn`, `gate`, `reap`, `pr`), so every
 existing cap applies: three fix rounds, two replacements of a stalled or dead worker per step,
 one rerun of an inconclusive verifier, `max_sessions_per_task` and `max_same_reason_failures`.
-`--resume` is the same loop, so it continues from whatever already exists.
+`--resume` is the same loop, so it continues from whatever already exists. A worker that died or
+was stopped without its artifact is replaced; a replacement builder continues from whatever the
+lost builder had already committed on the task's branch. The checks command runs once per commit:
+a pass before the verifier is the result the gate records.
 
 It ends in one of three states and exits 0, 2 or 1:
 
@@ -71,8 +74,10 @@ with the live facts read fresh; `--json` gives the same record to a script:
 Token counts are read from the agent's own records for the worker's folder: opencode's session
 database and Codex's thread database. `total` counts every token the agent reports, cached
 input included. `hw status TASK` also works for a task the coordinator drives; its record is
-derived from the task's events, with elapsed time counted from the task's creation. If the
-`hw run` process dies, the record reads `blocked` with the resume command.
+derived from the task's events, with elapsed time counted from the task's creation. A running
+`hw run` holds a lock file in the task folder; if that process dies the lock goes with it, and
+the record reads `blocked` with the resume command. Only sessions that began with the worker are
+counted, so an older session from a reused folder path never adds to a task's tokens.
 
 ### Budgets
 
@@ -82,8 +87,12 @@ for every Project in `config.json`; the nearest one wins. `hw run` checks them e
 When one is reached it stops the task's workers, marks the task `blocked` with the reason and
 sends the webhook with `"event": "budget"`. `spawn` also refuses to start a worker for any task
 that is over budget, so a coordinator-driven task is capped too (its minutes count from the
-task's creation). A token budget only counts tokens an agent reports: sessions whose count is
-`unknown` cannot be held to it, and the status says which those are.
+task's creation). Only a running `hw run` stops workers: for a coordinator's task, or after the
+`hw run` process has died, a worker already started keeps going until it ends and no further one
+starts. A token budget only counts tokens an agent reports: sessions whose count is `unknown`
+cannot be held to it, and the status says which those are. Time a task spends held by a machine
+limit counts as running time. A blocked task keeps its place under `max_tasks_at_once` until it
+finishes or you end it with `hw stop`.
 
 ### Webhook
 
@@ -112,8 +121,11 @@ is never recorded and then ignored:
 - `--task` on a finished `hw run` task is refused, with the follow-up command.
 
 `--new` sends a plain message to the coordinator as written, for a new request that only
-mentions an old task. The coordinator cannot start workers, run the gate or open a pull request
-for a `hw run` task; those calls are refused and it reports from `hw status TASK`.
+mentions an old task. `hw run` and `hw say --task` are the owner's commands: an agent session
+calling them is refused. A `hw run` task accepts as an answer only a message sent with `--task`,
+and such a message is never redelivered to the coordinator. The coordinator cannot start workers,
+run the gate or open a pull request for a `hw run` task; those calls are refused and it reports
+from `hw status TASK`.
 
 ## Projects and the coordinator
 

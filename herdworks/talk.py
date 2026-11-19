@@ -157,6 +157,10 @@ def say(project, text=None, number=None, root=ROOT, delivery_key=None, base=None
             entry = next((m for m in messages if m["number"] == number), None)
             if entry is None:
                 raise ValueError("unknown message number")
+            answered = project / "tasks" / str(entry.get("task"))
+            if entry.get("task") and (answered / "task.json").is_file() and read_task(answered).get("driver") == "run":
+                raise ValueError(f"message {number} was an answer to {entry['task']}, a hw run task, and is already "
+                                 f"saved for it; nothing to redeliver. See: hw status {entry['task']}")
             if text is not None and text != entry["text"]:
                 raise ValueError("repeat must use the original text")
             if base is not None and base != entry.get("base"):

@@ -127,6 +127,11 @@ def follow(path, as_json=False, interval=2.0, sleep=time.sleep):
         sleep(interval)
 
 
+def masked(settings):
+    """Settings for printing: a webhook URL can carry a secret, so its value is never shown."""
+    return {name: "(set)" if name == "webhook" and value else value for name, value in settings.items()}
+
+
 def authorize(project, memory_task=None, memory_command=False):
     caller = os.environ.get("HW_CALLER_TERMINAL")
     if caller is None:
@@ -289,7 +294,10 @@ def main(argv=None):
         return 0
     args = parser.parse_args(argv)
     try:
-        if hc.owner_mutation(list(argv) if argv is not None else sys.argv[1:]):
+        # Starting a run and answering one are the owner's decisions, never an agent's. This is decided
+        # from the parsed command, so no abbreviation or `--` spelling of the command line can skip it.
+        if (hc.owner_mutation(list(argv) if argv is not None else sys.argv[1:])
+                or args.command == 'run' or (args.command == 'say' and args.task)):
             hc.require_owner()
         if args.command in ('automation', 'automations') and os.environ.get('HW_CALLER_TERMINAL') is not None:
             raise ValueError('automations are governed by the owner outside Herdworks sessions')
@@ -324,7 +332,7 @@ def main(argv=None):
                 path = task_path(args.project, args.resume)
                 if not (path / 'task.json').is_file():
                     raise ValueError(f'no task {args.resume} in Project {args.project}')
-                drive.set_budget(path, args.max_minutes, args.max_tokens)
+                drive.set_budget(path, args.max_minutes, args.max_tokens)  # refuses a task hw run does not drive
             else:
                 if args.file and args.text is not None:
                     raise ValueError('use text or --file')
@@ -397,9 +405,7 @@ def main(argv=None):
             from .setup import setup
             return setup(check_only=args.check)
         elif args.command == "config":
-            # A webhook URL can carry a secret, so its value is never printed.
-            print(json.dumps({name: "(set)" if name == "webhook" and value else value
-                              for name, value in config().items()}, indent=2))
+            print(json.dumps(masked(config()), indent=2))
         elif args.command == "project":
             if args.action == "add":
                 if args.github:
@@ -408,8 +414,8 @@ def main(argv=None):
                     path = add_project(args.project, args.repo, args.base or "main", args.prefix)
                 print(f"added Project {path.name}")
             else:
-                print(json.dumps(grant_project(project_path(args.project), args.push,
-                                               args.draft_pr, args.remote, args.gh, args.unsandboxed)))
+                print(json.dumps(masked(grant_project(project_path(args.project), args.push,
+                                                      args.draft_pr, args.remote, args.gh, args.unsandboxed))))
         elif args.command == "up":
             result = up(project_path(args.project))
             print(f"started {result['name']}")

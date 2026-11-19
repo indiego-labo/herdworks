@@ -285,7 +285,10 @@ def spawn(path, role="build", root=ROOT, replaces=None):
                 commit = target.get("commit") or data["base"]
                 head = git(data["repo"], "rev-parse", f"refs/heads/{data['branch']}")
                 if head != commit:
-                    raise ValueError("builder branch advanced without a complete report; ask before replacing at a different commit")
+                    if data.get("driver") != "run":
+                        raise ValueError("builder branch advanced without a complete report; ask before replacing at a different commit")
+                    # `hw run` has nobody to ask: the replacement continues from what the lost builder committed.
+                    commit = head
             elif target.get("commit") != commit:
                 raise ValueError("replacement must verify the same current commit")
             round_number = target.get("round", 0)
@@ -332,6 +335,10 @@ def spawn(path, role="build", root=ROOT, replaces=None):
         if worker_role == "build":
             if target:
                 brief = (path / target["folder"] / "brief.md").read_text()
+            elif role != "fix" and previous and previous.get("round"):
+                # A build restarted by an answer during a fix round keeps that round's brief and its findings.
+                brief = ((path / previous["folder"] / "brief.md").read_text()
+                         + f"\n--- answers given since ---\n{answer_text(path)}\n")
             else:
                 brief = fix_brief(path, round_number, root) if role == "fix" else build_brief(path, root)
         if target:

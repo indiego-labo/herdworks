@@ -6,6 +6,7 @@ is the same loop, so it continues from whatever already exists."""
 from dataclasses import dataclass
 import fcntl
 import json
+import math
 import os
 import tempfile
 import time
@@ -36,6 +37,7 @@ class Step:
     reason: str = None
     next_step: str = None
     wait: bool = False
+    retry: tuple = None  # the (role, replaces) a limit is holding back; only that start is tried again
 
 
 def commands(path):
@@ -43,7 +45,24 @@ def commands(path):
     name, task = data["project"], data["id"]
     resume = f"hw run -p {name} --resume {task}"
     return dict(resume=resume, answer=f'hw say {name} --task {task} "YOUR DECISION"',
-                inspect=f"look at it with: hw status {task}; then continue with: {resume}, or end it with: hw stop {name} {task}")
+                inspect=f"look at it with: hw status {task}. {resume} tries the same step again; if that cannot pass, "
+                        f"end it with: hw stop {name} {task}, and start a fresh task with: hw run -p {name} \"...\"")
+
+
+def positive(name, value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a positive number")
+    return value
+
+
+def drivable(path):
+    """Refuse a task `hw run` must not touch, before anything about it is changed."""
+    data = read_task(path)
+    if data.get("driver") != "run":
+        raise ValueError(f"{data['id']} is the Project coordinator's task; hw run continues only tasks it started")
+    if any(e.get("event") == "closed" for e in events(path)):
+        raise ValueError(f"{data['id']} is closed; start a new task with: hw run -p {data['project']} \"...\"")
+    return data
 
 
 def create(project, text, base=None, kind="build", max_minutes=None, max_tokens=None):
@@ -56,13 +75,13 @@ def create(project, text, base=None, kind="build", max_minutes=None, max_tokens=
     extra = {"driver": "run"}
     for name, value in (("max_minutes", max_minutes), ("max_tokens", max_tokens)):
         if value is not None:
-            if not value > 0:
-                raise ValueError(f"{name} must be a positive number")
-            extra[name] = value
+            extra[name] = positive(name, value)
     with tempfile.TemporaryDirectory(prefix="hw-run-") as folder:
         brief = Path(folder) / "brief.md"
         brief.write_text(text)
         path, _ = new_task(project, brief, base=base, kind=kind, extra=extra)
+    # Worker briefs quote the coordinator's restated intent; without a coordinator the request stands as written.
+    (coordinator_task(path) / "intent.md").write_text(INTENT)
     now = time.time()
     monitor.write(path, state="running", stage="queued", pid=os.getpid(), active_seconds=0,
                   run_started_at=now, heartbeat_at=now, ended_at=None)
@@ -70,9 +89,9 @@ def create(project, text, base=None, kind="build", max_minutes=None, max_tokens=
 
 
 def set_budget(path, max_minutes=None, max_tokens=None):
-    changes = {name: value for name, value in (("max_minutes", max_minutes), ("max_tokens", max_tokens)) if value is not None}
-    if any(not value > 0 for value in changes.values()):
-        raise ValueError("max_minutes and max_tokens must be positive numbers")
+    drivable(path)
+    changes = {name: positive(name, value) for name, value in (("max_minutes", max_minutes), ("max_tokens", max_tokens))
+               if value is not None}
     if changes:
         with locked(path):
             data = dict(read_task(path), **changes)
@@ -88,7 +107,8 @@ def start(path, role, replaces=None):
     except ValueError as error:
         text = str(error)
         if text.startswith("queued: "):
-            return Step(stage="queued", action=f"waiting for a free place: held by {text[8:]}", wait=True)
+            return Step(stage="queued", action=f"waiting for a free place: held by {text[8:]}", wait=True,
+                        retry=(role, replaces))
         return Step("blocked", stage, reason=f"no {role} worker was started: {text}", next_step=commands(path)["inspect"])
     return Step(stage=stage)
 
@@ -129,6 +149,10 @@ def escalated(path):
 
 def judge(path, checks=None):
     """Run the gate and act on its answer: deliver, start a fix round, hand over, or stop for a person."""
+    if checks is None:
+        # Checks that passed on this commit before its verifier started are not run a second time.
+        checks = next((e["checks"] for e in reversed(events(path)) if e.get("event") == "run" and e.get("checks")
+                       and e.get("checked") == built_commit(path)), None)
     passed, commit, reasons = gate(path, checks=checks)
     if passed:
         return deliver(path, commit)
@@ -137,8 +161,9 @@ def judge(path, checks=None):
         return raised
     verdict = newest_artifact(path, "verify-*/verdict.md")
     review = newest_artifact(path, "evidence-*/review.md")
-    if ((checks or {}).get("exit") or any(reason.startswith("checks command exited") for reason in reasons)
-            or (verdict and first_line(verdict) == "FAIL") or (review and first_line(review) == "REJECTED")):
+    spike = read_task(path).get("kind") == "spike"  # a spike reports findings; a no is never "fixed" into a yes
+    if (any(reason.startswith("checks command exited") for reason in reasons)
+            or (not spike and ((verdict and first_line(verdict) == "FAIL") or (review and first_line(review) == "REJECTED")))):
         return start(path, "fix")
     if blocked_requirements(path) and check_gate(path, manual_verification=True)[0]:
         return deliver(path, commit, manual=True)
@@ -183,25 +208,28 @@ def advance(path, now=None):
         if opening == "BLOCKED":
             if answered_since(path, artifact.stat().st_mtime):
                 append_event(path, {"event": "rewind", "at": time.time()})
-                return start(path, "build")
+                return start(path, "build")  # a held start is retried by the loop, so one answer rewinds once
             question = " ".join(artifact.read_text().splitlines()[1:2]) or f"see {artifact}"
             return Step("blocked", "build", reason=f"the builder needs a decision: {question}", next_step=say["answer"])
         commit = built_commit(path)
         if not commit:
             return Step("blocked", "build", reason=f"the builder reported READY, but not for a new head of {data['branch']}",
                         next_step=f"read {artifact}; {say['inspect']}")
+        if any(e.get("role") == "verify" and e.get("commit") == commit for e in workers):
+            return Step("blocked", "build", reason=f"the fix builder reported READY without a new commit; {commit} "
+                        "was already refused", next_step=f"read {artifact}; {say['inspect']}")
         checked = any(e.get("event") == "run" and e.get("checked") == commit for e in history)
         if checks_command(path.parents[1]) and not checked:
             # Checks cost no tokens, so they run before a verifier is spent on the commit.
             ran = run_checks(path, commit)
             if ran["exit"]:
                 return judge(path, ran)
-            monitor.note(path, f"checks passed: {ran['command']}", checked=commit)
+            monitor.note(path, f"checks passed: {ran['command']}", checked=commit, checks=ran)
         return start(path, "verify")
     if role == "verify":
         if environment_only(artifact) or (opening == "PASS" and not claim_problems(folder, data.get("kind"))):
             return start(path, "evidence")
-        if opening == "FAIL":
+        if opening == "FAIL" and data.get("kind") != "spike":
             return judge(path)
         # An inconclusive verdict or unusable claims get one more verifier; spawn refuses when a person is needed.
         step = start(path, "verify")
@@ -216,25 +244,23 @@ def advance(path, now=None):
 def drive(path, interval=5.0, announce=None, sleep=time.sleep):
     """Drive the task until it is done, blocked or failed; return its final status record."""
     path = Path(path)
-    data = read_task(path)
-    if data.get("driver") != "run":
-        raise ValueError(f"{data['id']} is the Project coordinator's task; hw run continues only tasks it started")
-    if any(e.get("event") == "closed" for e in events(path)):
-        raise ValueError(f"{data['id']} is closed; start a new task with: hw run -p {data['project']} \"...\"")
+    data = drivable(path)
     with (path / ".driver.lock").open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise ValueError(f"{data['id']} is already being driven; follow it with: hw watch {data['id']}") from None
+        # The lock is held for as long as this process drives the task; `hw status` reads it to tell whether
+        # a driver is alive. A status read holds it for an instant, so one refusal is tried again briefly.
+        for attempt in range(10):
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if attempt == 9:
+                    raise ValueError(f"{data['id']} is already being driven; follow it with: hw watch {data['id']}") from None
+                time.sleep(0.05)
         return _drive(path, interval, announce, sleep)
 
 
 def _drive(path, interval, announce, sleep):
     say = commands(path)
-    notes = coordinator_task(path)
-    notes.mkdir(parents=True, exist_ok=True)
-    if not (notes / "intent.md").exists():
-        (notes / "intent.md").write_text(INTENT)
     if is_stopped(path):
         append_event(path, {"event": "resumed", "at": time.time()})
     before = monitor.saved(path)
@@ -257,7 +283,7 @@ def _drive(path, interval, announce, sleep):
             announce(current)
         return current
 
-    shown = None
+    shown = pending = None
     try:
         while True:
             current = monitor.record(path)
@@ -268,8 +294,10 @@ def _drive(path, interval, announce, sleep):
                 stop(path)
                 return finish(Step("blocked", stage, reason=spent, next_step="raise the budget and continue: "
                                    f"{say['resume']} --max-minutes N (or --max-tokens N)"), "budget")
-            step = advance(path)
-            stage = step.stage
+            # While a limit holds a start back, only that start is tried again: the gate and the checks
+            # that led to it are not run once more on every turn.
+            step = start(path, *pending) if pending else advance(path)
+            stage, pending = step.stage, step.retry
             if step.state != "running":
                 return finish(step)
             if step.action and step.action != shown:
@@ -286,12 +314,13 @@ def _drive(path, interval, announce, sleep):
                            next_step=f"fix the cause, then continue with: {say['resume']}"))
 
 
-def detach(path, timeout=30.0):
+def detach(path):
     """Start the same loop in its own herdr core terminal, so it outlives this shell."""
     path = Path(path)
     data = read_task(path)
+    drivable(path)
     before = monitor.saved(path)
-    if before.get("state") == "running" and before.get("pid") != os.getpid() and monitor.alive(before.get("pid")):
+    if monitor.driven(path):
         raise ValueError(f"{data['id']} is already being driven; follow it with: hw watch {data['id']}")
     name = f"hw-{data['project']}-{data['id'].lower()}-run"[:32]
     # The label key differs from the workers' `hw` label, so stopping the task's workers never ends its driver.
@@ -300,7 +329,7 @@ def detach(path, timeout=30.0):
                      "env", f"HW_HOME={path.parents[3]}", str(ROOT / "bin/hw"), "run", "-p", data["project"],
                      "--resume", data["id"])
     # Return once the new process has taken the task over, so a caller can follow it at once.
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         now = monitor.saved(path)
         taken = now.get("pid") not in (None, os.getpid(), before.get("pid"))

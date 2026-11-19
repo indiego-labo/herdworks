@@ -17,31 +17,36 @@ def codex_db():
     return found[-1] if found else home / "state.sqlite"
 
 
-def query(database, sql, cwd):
+SLACK = 60  # seconds a session's own start time may precede the launch Herdworks recorded
+
+
+def query(database, sql, *values):
     """One row from the agent's own database, opened read-only; None when it cannot answer."""
     if not Path(database).is_file():
         return None
     try:
         connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=1)
         try:
-            return connection.execute(sql, (str(cwd),)).fetchone()
+            return connection.execute(sql, values).fetchone()
         finally:
             connection.close()
     except sqlite3.Error:
         return None
 
 
-def opencode(cwd):
+def opencode(cwd, since):
     row = query(opencode_db(), "select count(*), sum(tokens_input), sum(tokens_output), sum(tokens_reasoning), "
-                               "sum(tokens_cache_read), sum(tokens_cache_write) from session_v2 where directory = ?", cwd)
+                               "sum(tokens_cache_read), sum(tokens_cache_write) from session_v2 "
+                               "where directory = ? and time_created >= ?", str(cwd), int((since - SLACK) * 1000))
     if not row or not row[0]:
         return None
     counts = dict(zip(PARTS, (int(value or 0) for value in row[1:])))
     return dict(counts, total=sum(counts.values()))
 
 
-def codex(cwd):
-    row = query(codex_db(), "select count(*), sum(tokens_used) from threads where cwd = ?", cwd)
+def codex(cwd, since):
+    row = query(codex_db(), "select count(*), sum(tokens_used) from threads where cwd = ? and created_at >= ?",
+                str(cwd), int(since - SLACK))
     if not row or not row[0]:
         return None
     return dict(total=int(row[1] or 0))
@@ -50,10 +55,11 @@ def codex(cwd):
 READERS = {"opencode": opencode, "codex": codex}
 
 
-def read(agent, cwd):
-    """What the session started in `cwd` has used, or None when its agent keeps no readable count.
+def read(agent, cwd, since=0):
+    """What the session started in `cwd` at or after `since` has used, or None when its agent keeps no readable count.
 
-    Each worker runs in its own folder, so the folder identifies the session. `total` counts every
-    token the agent reports, cached input included."""
+    Each worker runs in its own folder, so the folder identifies the session; the start time keeps out
+    an older session from a folder path that was used before. `total` counts every token the agent
+    reports, cached input included."""
     reader = READERS.get(agent)
-    return reader(cwd) if reader else None
+    return reader(cwd, since) if reader else None

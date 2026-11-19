@@ -61,7 +61,7 @@ Keep a task from running away with a budget, per task or per Project:
 hw run -p myapp --max-minutes 60 --max-tokens 20000000 "..."
 ```
 
-When a budget is hit the task's agents are stopped and it is marked blocked with the reason.
+When a budget is hit, `hw run` stops the task's agents and marks it blocked with the reason.
 A Project can also name a `webhook` URL that receives a JSON POST when a task is done, blocked,
 failed or over budget. See [docs/reference.md](docs/reference.md#one-command-runs).
 

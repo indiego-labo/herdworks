@@ -9,9 +9,9 @@ import time
 from unittest.mock import patch
 from herdworks import drive, monitor, tokens
 from herdworks.cli import follow, main
-from herdworks.pickup import close
+from herdworks.pickup import close, stop
 from herdworks.projects import read_project
-from herdworks.runs import append_event, events, git
+from herdworks.runs import answered_since, append_event, events, git
 from herdworks.spawn import spawn
 from herdworks.talk import inbox
 from tests.support import RunCase, write_claims
@@ -45,7 +45,7 @@ class RunScenario(RunCase):
     def setUp(self):
         super().setUp()
         (self.home / "config.json").write_text('{"max_worktrees": 20}')
-        self.live, self.idle, self.killed, self.launched = set(), set(), [], []
+        self.live, self.idle, self.killed, self.launched, self.detached = set(), set(), [], [], []
         self.script = {"build": [], "verify": [], "evidence": []}
         for target, effect in (("launch", self.launch), ("get", self.get), ("call", self.call),
                                ("sessions", lambda: [dict(address=name) for name in sorted(self.live | self.idle)]),
@@ -58,7 +58,11 @@ class RunScenario(RunCase):
         role, cwd = kwargs["role"], kwargs["cwd"]
         self.launched.append(kwargs)
         act = self.script[role].pop(0) if self.script[role] else "ok"
-        if act == "hang":
+        if act == "commit-hang":
+            # Commits, then never reports: what a builder killed between its commit and its report leaves.
+            (cwd / "hello.py").write_text("print('half done')\n")
+            git(cwd, "commit", "-am", "wip: half done")
+        if act in ("hang", "commit-hang"):
             self.live.add(kwargs["name"])
         else:
             # Like a real agent, it stays in its terminal, idle, after leaving its artifact.
@@ -74,8 +78,12 @@ class RunScenario(RunCase):
         report = wt.parent / "report.md"
         if act == "question":
             report.write_text("BLOCKED\nShould the greeting be loud or polite?\n")
+        elif act == "noop":
+            report.write_text(f"READY {git(wt, 'rev-parse', 'HEAD')}\n")
         else:
             (wt / "hello.py").write_text(f"print('{wt.parent.name}')\n")
+            if act == "fixed":
+                (wt / "fixed.txt").write_text("fixed\n")
             git(wt, "add", ".")
             git(wt, "commit", "-m", f"feat: {wt.parent.name}")
             report.write_text(f"READY {git(wt, 'rev-parse', 'HEAD')}\n")
@@ -84,9 +92,20 @@ class RunScenario(RunCase):
     def verify(self, wt, act):
         folder = wt.parent
         commit = git(wt, "rev-parse", "HEAD")
-        write_claims(folder, "DISPROVED" if act == "fail" else "PROVED")
+        (folder / "evidence").mkdir(exist_ok=True)
         (folder / "evidence/commands.json").write_text(json.dumps([dict(command="python3 hello.py", output="ok\n")]))
-        (folder / "verdict.md").write_text(f"{'FAIL' if act == 'fail' else 'PASS'}\nCommit: {commit}\nFinding: wrong output\n")
+        if act == "environment":
+            write_claims(folder, "PROVED", "NOT_PROVED")
+            text = ("INCONCLUSIVE\nBLOCKED-BY-ENVIRONMENT: the device greeting; missing simulator\n"
+                    "PASSED-OTHER-CHECKS: cli and unittest, evidence/ac1.txt\n")
+        elif act == "inconclusive":
+            write_claims(folder, "NOT_PROVED")
+            text = "INCONCLUSIVE\nCause: ambiguous-evidence\nAsk: run it again with a clean cache\n"
+        else:
+            # "spike-no": the answer to the question is an evidenced no, which a spike reports as PASS.
+            write_claims(folder, "DISPROVED" if act in ("fail", "spike-no") else "PROVED")
+            text = f"{'FAIL' if act == 'fail' else 'PASS'}\nFinding: wrong output\n"
+        (folder / "verdict.md").write_text(text + f"Commit: {commit}\n")
         self.stamp(folder / "verdict.md")
 
     def evidence(self, work, act):
@@ -108,6 +127,10 @@ class RunScenario(RunCase):
             self.live.discard(args[1])
             self.idle.discard(args[1])
             self.killed.append(args[1])
+        if args[0] == "run":
+            # `hw run --detach`: stand in for the new process taking the task over.
+            self.detached.append(list(map(str, args)))
+            monitor.write(args[args.index("--cwd") + 1], state="running", pid=os.getpid() + 1)
         return dict(text="last screen")
 
     def run_task(self, text="Make hello print its build. Done when python3 hello.py prints it.", **options):
@@ -201,6 +224,140 @@ class OneCommandTests(RunScenario):
         self.assertEqual(final["state"], "done")
         self.assertIn("Polite.", (path / "build-2/brief.md").read_text())
 
+    def test_escalation_blocks_then_the_answer_continues_and_checks_never_run_twice_on_a_commit(self):
+        counter = self.root / "checks-ran"
+        self.set_project(checks=f"echo x >> {counter}; test -f fixed.txt")
+        path, final = self.run_task()
+        self.assertEqual(final["state"], "blocked")
+        self.assertIn("refused 2 commits for the same reasons", final["reason"])
+        self.script["build"] = ["fixed"]
+        with patch("herdworks.drive.detach"):
+            self.assertEqual(self.hw("say", "unit", "--task", "HE-2", "Add fixed.txt; that is what the check wants.")[0], 0)
+        final = drive.drive(path, interval=0, sleep=lambda seconds: None)
+        self.assertEqual(final["state"], "done")
+        self.assertEqual([launch["role"] for launch in self.launched], ["build", "build", "build", "verify", "evidence"])
+        self.assertIn("that is what the check wants", (path / "build-3/brief.md").read_text())
+        # Two failing commits, one refusal re-read after the answer, one passing commit checked once before its verifier.
+        self.assertEqual(len(counter.read_text().splitlines()), 4)
+        self.assertEqual([e["passed"] for e in events(path) if e["event"] == "gate"], [False, False, False, True])
+
+    def test_a_held_fix_round_waits_without_running_the_gate_again(self):
+        self.script["verify"] = ["fail", "ok"]
+        held = []
+
+        def sometimes_full(path, role="build", replaces=None):
+            if role == "fix" and len(held) < 3:
+                held.append(role)
+                raise ValueError("queued: max_worker_sessions")
+            return spawn(path, role, replaces=replaces)
+        with patch("herdworks.drive.spawn", side_effect=sometimes_full):
+            path, final = self.run_task()
+        self.assertEqual((final["state"], len(held)), ("done", 3))
+        self.assertEqual([e["passed"] for e in events(path) if e["event"] == "gate"], [False, True])
+        waits = [e["action"] for e in events(path) if e["event"] == "run" and "held by" in e["action"]]
+        self.assertEqual(waits, ["waiting for a free place: held by max_worker_sessions"])
+
+    def test_a_stalled_worker_is_replaced_and_the_task_finishes(self):
+        self.script["build"] = ["hang", "ok"]
+        path = drive.create(self.project, "Request")
+        stalled = [dict(name="hw-unit-he-2-build-1", stalled=True)]
+        with patch("herdworks.drive.probe", side_effect=[stalled] + [[]] * 20):
+            final = drive.drive(path, interval=0, sleep=lambda seconds: None)
+        self.assertEqual(final["state"], "done")
+        self.assertEqual(self.killed[0], "hw-unit-he-2-build-1")
+        self.assertEqual([launch["role"] for launch in self.launched], ["build", "build", "verify", "evidence"])
+        self.assertTrue((path / "build-1/stalled-1.txt").is_file())
+
+    def test_a_worker_still_in_its_turn_is_given_time_before_it_is_ended(self):
+        path = drive.create(self.project, "Request")
+        drive.advance(path)
+        self.live, self.idle = self.idle, set()  # it wrote its report and is still typing
+        step = drive.advance(path)
+        self.assertEqual((step.wait, step.stage, self.killed), (True, "build", []))
+        step = drive.advance(path, now=time.time() + drive.SETTLE + 1)
+        self.assertEqual((step.stage, self.killed), ("verify", ["hw-unit-he-2-build-1"]))
+
+    def test_environment_blocked_requirement_is_handed_over_not_verified(self):
+        self.script["verify"] = ["environment"]
+        path, final = self.run_task()
+        self.assertEqual((final["state"], final["stage"], final["status"]), ("blocked", "pr", "in progress"))
+        self.assertIn("needs manual verification of: the device greeting; missing simulator", final["reason"])
+        self.assertIn("hw pr unit HE-2 --manual-verification", final["next_step"])
+        self.assertEqual([launch["role"] for launch in self.launched], ["build", "verify", "evidence"])
+        self.set_project(grants={"push": True, "draft-pr": True})
+        with patch("herdworks.drive.open_pr", return_value="https://github.com/o/r/pull/8") as opened:
+            final = drive.drive(path, interval=0, sleep=lambda seconds: None)
+        opened.assert_called_once_with(path, manual_verification=True)
+        self.assertEqual(final["state"], "done")
+        self.assertIn("needs manual verification; draft pull request: https://github.com/o/r/pull/8", final["reason"])
+
+    def test_inconclusive_verdict_gets_one_more_verifier_then_asks(self):
+        self.script["verify"] = ["inconclusive", "ok"]
+        _, final = self.run_task()
+        self.assertEqual(final["state"], "done")
+        self.assertEqual([launch["role"] for launch in self.launched], ["build", "verify", "verify", "evidence"])
+        self.launched.clear()
+        self.script["verify"] = ["inconclusive", "inconclusive"]
+        path, final = self.run_task("Second request")
+        self.assertEqual((final["state"], final["stage"]), ("blocked", "verify"))
+        self.assertIn("INCONCLUSIVE", final["reason"])
+        self.assertIn("Ask: run it again with a clean cache", final["reason"])
+        self.assertEqual([launch["role"] for launch in self.launched], ["build", "verify", "verify"])
+
+    def test_a_spike_with_a_disproved_finding_is_done_and_never_gets_a_fix_round(self):
+        self.script["verify"] = ["spike-no"]
+        _, final = self.run_task(kind="spike")
+        self.assertEqual(final["state"], "done")
+        self.assertEqual([launch["role"] for launch in self.launched], ["build", "verify", "evidence"])
+        self.launched.clear()
+        self.script["verify"] = ["fail", "fail"]
+        _, final = self.run_task("Second question", kind="spike")
+        self.assertEqual(final["state"], "blocked")
+        self.assertEqual([launch["role"] for launch in self.launched], ["build", "verify", "verify"])
+
+    def test_fix_builder_without_a_new_commit_blocks_instead_of_failing(self):
+        self.script["verify"] = ["fail"]
+        self.script["build"] = ["ok", "noop"]
+        _, final = self.run_task()
+        self.assertEqual((final["state"], final["stage"]), ("blocked", "build"))
+        self.assertIn("reported READY without a new commit", final["reason"])
+        self.assertIn("start a fresh task with: hw run -p unit", final["next_step"])
+
+    def test_a_question_in_a_fix_round_keeps_the_findings_after_the_answer(self):
+        self.script["verify"] = ["fail", "ok"]
+        self.script["build"] = ["ok", "question", "ok"]
+        path, final = self.run_task()
+        self.assertEqual(final["state"], "blocked")
+        with patch("herdworks.drive.detach"):
+            self.assertEqual(self.hw("say", "unit", "--task", "HE-2", "Polite.")[0], 0)
+        final = drive.drive(path, interval=0, sleep=lambda seconds: None)
+        self.assertEqual(final["state"], "done")
+        brief = (path / "build-3/brief.md").read_text()
+        for content in ("Finding: wrong output", "Fix round: 1 of 3", "Polite."):
+            self.assertIn(content, brief)
+        self.assertEqual(len([e for e in events(path) if e["event"] == "rewind"]), 1)
+
+    def test_hw_stop_during_a_run_ends_it_blocked(self):
+        self.script["build"] = ["hang"]
+        path = drive.create(self.project, "Request")
+        final = drive.drive(path, interval=0, sleep=lambda seconds: stop(path))
+        self.assertEqual((final["state"], final["status"]), ("blocked", "stopped"))
+        self.assertIn("stopped", final["reason"])
+        self.assertIn("hw run -p unit --resume HE-2", final["next_step"])
+        self.assertEqual(self.killed, ["hw-unit-he-2-build-1"])
+
+    def test_detach_starts_the_same_command_in_a_terminal_that_stop_will_not_end(self):
+        path = drive.create(self.project, "Request")
+        code, out, _ = self.hw("run", "-p", "unit", "--resume", "HE-2", "--detach")
+        self.assertEqual(code, 0)
+        self.assertIn("Follow it with: hw watch HE-2", out)
+        (started,) = self.detached
+        self.assertEqual(started[started.index("--") + 1:][0:2], ["env", f"HW_HOME={self.home}"])
+        self.assertEqual(started[-5:], ["run", "-p", "unit", "--resume", "HE-2"])
+        self.assertIn("hwrun=unit:HE-2", started)
+        self.assertNotIn("hw=unit:HE-2", started)
+        self.assertIn("--no-parent", started)
+
     def test_dead_worker_is_replaced_and_a_third_death_blocks(self):
         self.script["build"] = ["hang", "hang", "hang"]
         path = drive.create(self.project, "Request")
@@ -257,10 +414,49 @@ class OneCommandTests(RunScenario):
         caller = dict(address="t1", state="live", cwd=str(self.project / "coordinator"),
                       labels=dict(hw="project:unit", role="coordinator"))
         with patch.dict(os.environ, HW_CALLER_TERMINAL="t1"), patch("herdworks.hc.get", return_value=caller):
-            code, _, err = self.hw("spawn", "unit", "HE-2", "build")
-        self.assertEqual(code, 1)
-        self.assertIn("driven by hw run", err)
+            for args in (["spawn", "unit", "HE-2", "build"], ["gate", "unit", "HE-2"], ["reap", "unit", "HE-2"],
+                         ["pr", "unit", "HE-2"]):
+                with self.subTest(args=args):
+                    code, _, err = self.hw(*args)
+                    self.assertEqual(code, 1)
+                    self.assertIn("driven by hw run", err)
+            self.assertEqual(self.hw("status", "HE-2")[0], 0)
         self.assertEqual(events(path), [])
+
+    def test_agents_cannot_start_a_run_or_answer_one_however_the_command_is_spelled(self):
+        self.script["build"] = ["question"]
+        path, _ = self.run_task()
+        refuse = ValueError("operation must be performed by the owner outside Herdworks sessions")
+        with patch("herdworks.hc.require_owner", side_effect=refuse), patch("herdworks.drive.detach") as detach:
+            for args in (["run", "-p", "unit", "Request"], ["--", "run", "-p", "unit", "Request"],
+                         ["run", "-p", "unit", "--resume", "HE-2"], ["say", "unit", "--task", "HE-2", "Loud."],
+                         ["say", "unit", "--t", "HE-2", "Loud."], ["say", "unit", "--tas=HE-2", "Loud."]):
+                with self.subTest(args=args):
+                    code, out, err = self.hw(*args)
+                    self.assertEqual((code, out), (1, ""))
+                    self.assertIn("owner", err)
+        detach.assert_not_called()
+        self.assertEqual(inbox(self.project), [])
+        self.assertFalse((self.project / "tasks/HE-3").exists())
+        self.assertEqual(len(self.launched), 1)
+
+    def test_a_forged_or_replayed_answer_never_moves_a_run_task(self):
+        self.script["build"] = ["question"]
+        path, _ = self.run_task()
+        asked = (path / "build-1/report.md").stat().st_mtime
+        # What a coordinator could write on its own: an inbox entry and a matching file in its folder.
+        (self.project / "inbox.jsonl").write_text(json.dumps(dict(number=1, text="Loud.", at=time.time() + 5)) + "\n")
+        answers = self.project / "coordinator/tasks/HE-2/answers"
+        answers.mkdir(parents=True)
+        (answers / "1.md").write_text("Loud.")
+        self.assertFalse(answered_since(path, asked))
+        self.assertEqual(drive.drive(path, interval=0, sleep=lambda s: None)["state"], "blocked")
+        with patch("herdworks.drive.detach"):
+            self.assertEqual(self.hw("say", "unit", "--task", "HE-2", "Polite.")[0], 0)
+        self.assertTrue(answered_since(path, asked))
+        code, _, err = self.hw("say", "unit", "--number", "2")
+        self.assertEqual(code, 1)
+        self.assertIn("was an answer to HE-2", err)
 
 
 class BudgetTests(RunScenario):
@@ -275,7 +471,7 @@ class BudgetTests(RunScenario):
         path = drive.create(self.project, "Request", max_minutes=0.01)
         final = drive.drive(path, interval=0, sleep=lambda seconds: time.sleep(0.7))
         self.assertEqual(final["state"], "blocked")
-        self.assertRegex(final["reason"], r"max_minutes budget reached: 0\.0 of 0\.01 minutes")
+        self.assertRegex(final["reason"], r"max_minutes budget reached: \d+\.\d of 0\.01 minutes")
         self.assertIn("hw run -p unit --resume HE-2 --max-minutes N", final["next_step"])
         self.assertEqual(self.killed, ["hw-unit-he-2-build-1"])
         self.assertEqual(final["status"], "stopped")
@@ -307,12 +503,62 @@ class BudgetTests(RunScenario):
         self.assertEqual(final["tokens"], dict(build="unknown", verify="unknown", evidence="unknown",
                                                total="unknown", partial=True))
 
+    def test_resume_continues_from_a_commit_the_stopped_builder_left_without_a_report(self):
+        self.script["build"] = ["commit-hang", "ok"]
+        path = drive.create(self.project, "Request", max_minutes=0.01)
+        blocked = drive.drive(path, interval=0, sleep=lambda seconds: time.sleep(0.7))
+        self.assertEqual(blocked["state"], "blocked")
+        half = git(self.repo, "rev-parse", "refs/heads/hw/HE-2")
+        self.assertNotEqual(half, json.loads((path / "task.json").read_text())["base"])
+        code, out, _ = self.hw("run", "-p", "unit", "--resume", "HE-2", "--max-minutes", "30")
+        self.assertEqual(code, 0, out)
+        final = monitor.record(path)
+        self.assertEqual(final["state"], "done")
+        self.assertEqual(git(self.repo, "rev-parse", f"{final['commit']}~1"), half)
+
+    def test_blocked_time_is_not_counted_and_resume_adds_to_it(self):
+        self.script["build"] = ["question", "ok"]
+        path, blocked = self.run_task()
+        time.sleep(0.3)
+        later = monitor.record(path)
+        self.assertEqual(later["elapsed_seconds"], blocked["elapsed_seconds"])
+        with patch("herdworks.drive.detach"):
+            self.hw("say", "unit", "--task", "HE-2", "Polite.")
+        final = drive.drive(path, interval=0, sleep=lambda seconds: None)
+        self.assertGreaterEqual(final["elapsed_seconds"], blocked["elapsed_seconds"])
+        self.assertLess(final["elapsed_seconds"] - blocked["elapsed_seconds"], time.time() - later["ended_at"])
+
+    def test_resume_of_a_task_hw_run_does_not_drive_changes_nothing(self):
+        before = (self.path / "task.json").read_text()
+        code, _, err = self.hw("run", "-p", "unit", "--resume", "HE-1", "--max-minutes", "1")
+        self.assertEqual(code, 1)
+        self.assertIn("coordinator's task", err)
+        self.assertEqual((self.path / "task.json").read_text(), before)
+        path, _ = self.run_task()
+        close(path)
+        code, _, err = self.hw("run", "-p", "unit", "--resume", "HE-2", "--max-minutes", "1")
+        self.assertEqual(code, 1)
+        self.assertIn("HE-2 is closed", err)
+        self.assertNotIn("max_minutes", (path / "task.json").read_text())
+        for value in ("inf", "nan"):
+            self.assertEqual(self.hw("run", "-p", "unit", "--max-minutes", value, "Request")[0], 1)
+        self.assertFalse((self.project / "tasks/HE-3").exists())
+
+    def test_a_bad_budget_setting_is_shown_in_status_and_refused_by_spawn(self):
+        (self.notes / "intent.md").write_text("DONE CHECK")
+        self.set_project(max_minutes="soon")
+        code, out, _ = self.hw("status", "HE-1")
+        self.assertEqual(code, 0)
+        self.assertIn("budget: invalid (max_minutes must be a positive number)", out)
+        self.assertEqual(self.hw("status")[0], 0)
+        with self.assertRaisesRegex(ValueError, "max_minutes must be a positive number"):
+            spawn(self.path)
+
     def test_raising_the_budget_resumes_with_a_replacement_and_finishes(self):
         self.script["build"] = ["hang", "ok"]
         path = drive.create(self.project, "Request", max_minutes=0.01)
         drive.drive(path, interval=0, sleep=lambda seconds: time.sleep(0.7))
-        with patch("herdworks.drive.drive", wraps=lambda p, announce=None: drive._drive(p, 0, announce, lambda s: None)):
-            code, out, _ = self.hw("run", "-p", "unit", "--resume", "HE-2", "--max-minutes", "30")
+        code, out, _ = self.hw("run", "-p", "unit", "--resume", "HE-2", "--max-minutes", "30")
         self.assertEqual(code, 0, out)
         final = monitor.record(path)
         self.assertEqual((final["state"], final["budget"]["max_minutes"]), ("done", 30.0))
@@ -321,8 +567,11 @@ class BudgetTests(RunScenario):
         self.assertIn("resumed", [e["event"] for e in events(path)])
 
     def test_webhook_failure_never_stops_the_task(self):
-        for url, detail in ((self.hook.url.replace(str(self.hook.server.server_port), "9"), "URLError"),
-                            ("file:///etc/passwd", "ValueError")):
+        import socket
+        with socket.socket() as unused:
+            unused.bind(("127.0.0.1", 0))
+            refused = unused.getsockname()[1]  # closed again on leaving the block, so nothing listens there
+        for url, detail in ((f"http://127.0.0.1:{refused}/hook", "URLError"), ("file:///etc/passwd", "ValueError")):
             with self.subTest(url=url):
                 self.set_project(webhook=url)
                 self.launched.clear()
@@ -340,6 +589,10 @@ class BudgetTests(RunScenario):
         (self.home / "config.json").write_text(json.dumps(dict(webhook=self.hook.url, max_minutes=45)))
         code, out, _ = self.hw("config")
         self.assertEqual((code, json.loads(out)["webhook"], json.loads(out)["max_minutes"]), (0, "(set)", 45))
+        self.assertNotIn("SECRET-TOKEN", out)
+        self.set_project(webhook=self.hook.url)
+        code, out, _ = self.hw("project", "grant", "unit", "--no-push")
+        self.assertEqual((code, json.loads(out)["webhook"]), (0, "(set)"))
         self.assertNotIn("SECRET-TOKEN", out)
         path = drive.create(self.project, "Request")
         self.assertEqual(monitor.record(path)["budget"], {"max_minutes": 45, "max_tokens": None})
@@ -390,11 +643,14 @@ class StatusRecordTests(RunScenario):
     def test_tokens_come_from_the_agents_own_records_per_role(self):
         database = self.root / "opencode.db"
         connection = sqlite3.connect(database)
-        connection.execute("create table session_v2 (directory text, tokens_input integer, tokens_output integer, "
-                           "tokens_reasoning integer, tokens_cache_read integer, tokens_cache_write integer)")
+        connection.execute("create table session_v2 (directory text, time_created integer, tokens_input integer, "
+                           "tokens_output integer, tokens_reasoning integer, tokens_cache_read integer, tokens_cache_write integer)")
         path, _ = self.run_task()
-        connection.execute("insert into session_v2 values (?, 100, 20, 3, 4000, 0)", (str(path / "build-1/wt"),))
-        connection.execute("insert into session_v2 values (?, 1, 1, 1, 1, 1)", (str(path / "build-1/wt"),))
+        now = int(time.time() * 1000)
+        connection.execute("insert into session_v2 values (?, ?, 100, 20, 3, 4000, 0)", (str(path / "build-1/wt"), now))
+        connection.execute("insert into session_v2 values (?, ?, 1, 1, 1, 1, 1)", (str(path / "build-1/wt"), now))
+        # A session from an earlier use of the same folder path is not this worker's.
+        connection.execute("insert into session_v2 values (?, ?, 9, 9, 9, 9, 9)", (str(path / "build-1/wt"), now - 86400000))
         connection.commit()
         connection.close()
         events_file = path / "events.jsonl"
@@ -411,14 +667,14 @@ class StatusRecordTests(RunScenario):
         home = self.root / "codex"
         home.mkdir()
         connection = sqlite3.connect(home / "state_5.sqlite")
-        connection.execute("create table threads (cwd text, tokens_used integer)")
-        connection.executemany("insert into threads values (?, ?)", [("/w/a", 10), ("/w/a", 5), ("/w/b", 7)])
+        connection.execute("create table threads (cwd text, created_at integer, tokens_used integer)")
+        connection.executemany("insert into threads values (?, ?, ?)",
+                               [("/w/a", 5000, 10), ("/w/a", 5100, 5), ("/w/a", 100, 99), ("/w/b", 5000, 7)])
         connection.commit()
         connection.close()
-        with patch.dict(os.environ, CODEX_HOME=str(home)), patch("herdworks.tokens.codex_db", wraps=None) as unused:
-            unused.side_effect = lambda: home / "state_5.sqlite"
-            self.assertEqual(tokens.read("codex", "/w/a"), dict(total=15))
-            self.assertIsNone(tokens.read("codex", "/w/none"))
+        with patch("herdworks.tokens.codex_db", return_value=home / "state_5.sqlite"):
+            self.assertEqual(tokens.read("codex", "/w/a", since=5000), dict(total=15))
+            self.assertIsNone(tokens.read("codex", "/w/none", since=5000))
 
     def test_a_run_whose_driver_died_reads_as_blocked_with_the_resume_command(self):
         path = drive.create(self.project, "Request")
@@ -427,6 +683,14 @@ class StatusRecordTests(RunScenario):
         self.assertEqual(current["state"], "blocked")
         self.assertIn("no longer running", current["reason"])
         self.assertIn("hw run -p unit --resume HE-2", current["next_step"])
+        # A live process that merely has the saved pid is not the driver: only the held lock says so.
+        saved = dict(json.loads((path / "status.json").read_text()), pid=os.getpid(), updated_at=time.time() - 300)
+        (path / "status.json").write_text(json.dumps(saved))
+        self.assertEqual(monitor.record(path)["state"], "blocked")
+        with (path / ".driver.lock").open("a") as held:
+            import fcntl
+            fcntl.flock(held, fcntl.LOCK_EX)
+            self.assertEqual(monitor.record(path)["state"], "running")
 
     def test_coordinator_task_gets_a_derived_record_and_the_tree_shows_it(self):
         append_event(self.path, dict(event="session", address="t2", name="hw-unit-he-1-build-1", role="build",

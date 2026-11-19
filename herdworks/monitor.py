@@ -3,6 +3,7 @@
 `hw run` saves its state in the task's status.json. Everything else in the record (elapsed time,
 tokens, sessions, the last action) is read fresh from the task's records each time, so the same
 record also describes a task the coordinator drives."""
+import fcntl
 import json
 import os
 import time
@@ -17,7 +18,6 @@ from .probe import newest_file
 from .runs import (ARTIFACT, append_event, artifact_complete, built_commit, coordinator_task, derive_status,
                    escalation, events, first_line, read_task, write_journal)
 
-TERMINAL = ("blocked", "done", "failed")
 DERIVED = {"verified": "done", "for review": "done", "needs manual verification": "done",
            "stopped": "blocked", "escalated": "blocked", "waiting on you": "blocked"}
 
@@ -52,6 +52,20 @@ def alive(pid):
     except PermissionError:
         pass
     return True
+
+
+def driven(path):
+    """True while a `hw run` process holds the task's driver lock. The lock dies with its process, so
+    unlike a saved pid it cannot be mistaken for another program after a crash or a restart."""
+    try:
+        with (Path(path) / ".driver.lock").open() as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            return False
+    except FileNotFoundError:
+        return False
 
 
 def timeline(path):
@@ -94,7 +108,7 @@ def sessions(path, now):
         later = next((e.get("at") or e.get("started_at") for e in history[index + 1:] if e.get("at") or e.get("started_at")),
                      max(newest_file(folder), event["started_at"]))
         end = artifact.stat().st_mtime if finished else now if live else later
-        used = tokens.read(event.get("agent"), folder / ("work" if role == "evidence" else "wt"))
+        used = tokens.read(event.get("agent"), folder / ("work" if role == "evidence" else "wt"), event["started_at"])
         found.append(dict(name=event["name"], role=role, agent=event.get("agent") or "unknown", model=event.get("model"),
                           state="working" if live and not finished else "finished" if finished else "ended",
                           live=live, started_at=event["started_at"], seconds=round(max(0.0, end - event["started_at"]), 1),
@@ -131,7 +145,9 @@ def record(path, now=None):
     if run and own:
         state, stage, reason, next_step = own["state"], own["stage"], own.get("reason"), own.get("next_step")
         until = now
-        if state == "running" and not alive(own.get("pid")):
+        # A run that was just created has not taken its lock yet; for that moment its saved pid stands in.
+        starting = now - own.get("updated_at", 0) < 30 and alive(own.get("pid"))
+        if state == "running" and not driven(path) and not starting:
             # The driver died without saying so: its time counts up to its last heartbeat.
             state, until = "blocked", own.get("heartbeat_at", now)
             reason = "hw run is no longer running for this task; any worker it started may still be working"
@@ -159,16 +175,21 @@ def record(path, now=None):
         elapsed = (ended or now) - data["created_at"]
     if pr and state != "done":
         state, stage, reason, next_step = "done", "done", None, None
+    try:
+        limits = budget(path)
+    except ValueError as error:
+        # A bad setting must not hide every task's status; spawn and hw run still refuse it loudly.
+        limits = dict(max_minutes=None, max_tokens=None, error=str(error))
     current = dict(
         task=task, project=name, driver="run" if run else "coordinator", state=state, stage=stage, status=status,
         reason=reason, next_step=next_step, request=first_line(path / "brief.md")[:160],
         started_at=data["created_at"], ended_at=ended, elapsed_seconds=round(max(0.0, elapsed), 1),
         last_action=facts[-1][1] if facts else None, last_action_at=facts[-1][0] if facts else None,
-        tokens=token_summary(workers), budget=budget(path), branch=data["branch"],
+        tokens=token_summary(workers), budget=limits, branch=data["branch"],
         commit=pr["commit"] if pr else built_commit(path), pr_url=pr["url"] if pr else None, sessions=workers,
         webhook=next(({k: e.get(k) for k in ("at", "kind", "ok", "detail")}
                       for e in reversed(history) if e.get("event") == "webhook"), None))
-    if not run and state == "running":
+    if not run and state == "running" and "error" not in limits:
         spent = over_budget(path, current)
         if spent:
             current.update(state="blocked", reason=spent,
@@ -251,7 +272,8 @@ def render(current, now=None):
     lines.append(f"  branch: {current['branch']}" + (f" at {current['commit']}" if current["commit"] else ""))
     if current["pr_url"]:
         lines.append(f"  pull request: {current['pr_url']}")
-    limits = [f"{name} {value:g}" for name, value in current["budget"].items() if value]
+    limits = [f"invalid ({value})" if name == "error" else f"{name} {value:g}"
+              for name, value in current["budget"].items() if value]
     if limits:
         lines.append("  budget: " + ", ".join(limits))
     for worker in current["sessions"]:

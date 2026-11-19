@@ -98,9 +98,11 @@ def answered_since(path, asked_at):
     inbox = Path(path).parents[1] / 'inbox.jsonl'
     messages = {m['number']: m for line in inbox.read_text().splitlines() if line
                 for m in [json.loads(line)]}
+    # A task `hw run` drives takes answers only from `hw say --task`, which the owner alone may call.
+    addressed = Path(path).name if read_task(path).get('driver') == 'run' else None
     for answer in (notes / 'answers').glob('*.md'):
         message = messages.get(int(answer.stem)) if answer.stem.isdecimal() else None
-        if (message and message['at'] > asked_at
+        if (message and message['at'] > asked_at and (not addressed or message.get('task') == addressed)
                 and answer.read_text().strip() == message['text'].strip()):
             return True
     return False

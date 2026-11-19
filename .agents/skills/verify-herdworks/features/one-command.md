@@ -39,11 +39,13 @@ Gotchas:
 - A second verifier is not a failure. When the first one's `claims.json` is unusable (seen live: an
   `evidence` value listing several files), the gate would refuse it, so `hw run` starts one more
   verifier, as the coordinator's rule 30 does. A fix round (a second builder in part 1) is a failure.
-- The 0.15 minute budget is short on purpose: the builder must be killed before it commits, or the
-  resume in part 3 stops with "builder branch advanced without a complete report".
+- The 0.15 minute budget stops the builder within seconds of its start. If it had already committed,
+  the replacement in part 3 continues from that commit (`tests.test_run` covers that case with a
+  fake builder); the journey accepts either.
 - The webhook URL carries a token in its query string. The journey fails if that token or the
   listener's port appears in any task record, status or transcript.
 - Not covered live: opening a draft pull request from `hw run` (no remote here; `tests.test_run`
   covers the branch with a stand-in, `draft-pr` covers `hw pr` itself), a builder's BLOCKED question
-  answered through `hw say --task`, fix rounds and escalation (all in `tests.test_run` with fake
-  agents), and Codex token counts (reader unit-tested against the real table shape only).
+  answered through `hw say --task`, fix rounds, escalation, a stalled worker and the
+  manual-verification handover (all in `tests.test_run` with fake agents), and Codex token counts
+  (the reader's query was run read-only against the real Codex table; no Codex worker ran live).
