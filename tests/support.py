@@ -29,6 +29,11 @@ class RunCase(unittest.TestCase):
         self.environment = patch.dict(os.environ, HW_HOME=str(self.home))
         self.environment.start()
         self.addCleanup(self.environment.stop)
+        # Token counts come from the agents' own databases; tests never read the real ones.
+        for reader in ("opencode_db", "codex_db"):
+            source = patch(f"herdworks.tokens.{reader}", return_value=self.root / f"no-{reader}")
+            source.start()
+            self.addCleanup(source.stop)
         self.project = add_project("unit", self.repo, prefix="HE")
         self.path, _ = new_task(self.project, self.brief)
         self.notes = self.project / "coordinator/tasks/HE-1"

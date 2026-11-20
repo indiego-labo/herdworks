@@ -258,7 +258,7 @@ def setup(check_only=False):
     if not all(results) or not project:
         say('  Some steps are not done yet. Run hw setup again when ready.')
         return 1
-    say(f'  Give it a task:        hw say {project} "Fix the typo in the README. Done when it reads correctly."')
+    say(f'  Give it a task:        hw run -p {project} "Fix the typo in the README. Done when it reads correctly."')
     say(f'  Read its replies:      hw read {project}')
     say(f'  See its tasks:         hw tasks {project}')
     say('  Each task ends as a draft pull request for you to review and merge.')

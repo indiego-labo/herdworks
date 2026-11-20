@@ -48,6 +48,21 @@ def project_setting(project, name):
     return config(project.parents[1]).get(name) if own is None else own
 
 
+def budget(path):
+    """A task's time and token budget: its own task.json, else its Project, else this machine. Off unless set."""
+    own = json.loads((Path(path) / 'task.json').read_text())
+    result = {}
+    for name in ('max_minutes', 'max_tokens'):
+        value = own.get(name)
+        if value is None:
+            value = project_setting(Path(path).parents[1], name)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
+                                  or not math.isfinite(value) or value <= 0):
+            raise ValueError(f'{name} must be a positive number')
+        result[name] = value
+    return result
+
+
 def role_settings(project, role):
     from .projects import read_project
     role = {'build': 'builder', 'verify': 'verifier', 'evidence': 'evidence-reviewer'}.get(role, role)

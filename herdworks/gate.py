@@ -194,12 +194,14 @@ def check_gate(path, manual_verification=False, checks=None):
     return not reasons, commit, reasons
 
 
-def gate(path):
+def gate(path, checks=None):
+    """Judge the task and record the answer. `checks` is a result `run_checks` just produced for this commit."""
     cap = project_setting(path.parents[1], "max_same_reason_failures")
     if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
         raise ValueError("max_same_reason_failures must be a positive integer")
     with locked(path):
-        checks = run_checks(path, built_commit(path))
+        if checks is None or checks.get("commit") != built_commit(path):
+            checks = run_checks(path, built_commit(path))
         passed, commit, reasons = check_gate(path, checks=checks)
         history = events(path)
         append_event(path, {"event": "gate", "at": time.time(), "passed": passed,

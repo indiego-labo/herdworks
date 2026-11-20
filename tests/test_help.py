@@ -14,7 +14,7 @@ class HelpTests(RunCase):
 
     def test_next_step_follows_the_machine_state(self):
         self.assertIn('Your Projects: unit', next_step())
-        self.assertIn('hw say unit', text())
+        self.assertIn('hw run -p unit', text())
         with patch.dict(os.environ, HW_HOME=str(self.root / 'empty')):
             self.assertIn('choose a model', next_step())
             (self.root / 'empty').mkdir()

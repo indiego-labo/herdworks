@@ -3,21 +3,26 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import sys
+import time
 from . import hc
 from .gate import check_gate, gate, reap
 from .probe import format_fact, probe
 from .runs import ROOT, derive_status, escalation, locked, read_task, first_line, events
 from .projects import add_project, add_github_project, project_path, task_path, task_paths, new_task, read_project
-from .talk import up, say, read, latest, wait
+from .talk import up, say, read, latest, wait, route, answer
 from .spawn import spawn
 from .pickup import stop, close, tidy
 from .pr import open_pr, recorded_pr
 from .projects import grant_project
 from .limits import config, hold_reason
-from . import memory, automations
+from . import memory, automations, monitor
 from .status import tree
+from .home import hw_home
+
+TASK_ID = re.compile(r"[A-Z]{2}-[1-9][0-9]*")
 
 
 def install(root=ROOT, destination=None):
@@ -65,6 +70,68 @@ def task_lines(project):
         yield f"{data['id']} {status} {commit} {address} {first_line(path / 'brief.md')} {summary} {overrides} {held} {unsandboxed}".rstrip()
 
 
+def find_task(task_id, project=None):
+    """The folder of a task named by its id alone; the Project is needed only when two share a prefix."""
+    if project:
+        found = [task_path(project, task_id)]
+    else:
+        found = [item.parent / "tasks" / task_id for item in sorted((hw_home() / "projects").glob("*/project.json"))
+                 if read_project(item.parent)["prefix"] == task_id[:2]]
+    found = [path for path in found if (path / "task.json").is_file()]
+    if not found:
+        raise ValueError(f"no task {task_id}; hw tasks PROJECT lists a Project's tasks")
+    if len(found) > 1:
+        raise ValueError(f"{task_id} exists in Projects {', '.join(p.parents[1].name for p in found)}; add -p PROJECT")
+    return found[0]
+
+
+def open_tasks(project=None):
+    projects = [project_path(project)] if project else sorted(
+        item.parent for item in (hw_home() / "projects").glob("*/project.json"))
+    for folder in projects:
+        read_project(folder)
+        for item in task_paths(folder):
+            if not any(e.get("event") == "closed" for e in events(item.parent)):
+                yield item.parent
+
+
+def newest_task(project=None):
+    found = max(open_tasks(project), key=lambda path: read_task(path)["created_at"], default=None)
+    if found is None:
+        raise ValueError('no open task to follow; start one with: hw run -p PROJECT "..."')
+    return found
+
+
+def reporter(as_json=False):
+    """A function that prints a status record when it changed, and every half minute while it runs."""
+    shown = []
+
+    def report(current):
+        key = (current["state"], current["stage"], current["last_action"], int(current["elapsed_seconds"] // 30))
+        if [key] != shown:
+            shown[:] = [key]
+            print(json.dumps(current) if as_json else time.strftime("%H:%M:%S ") + monitor.line(current), flush=True)
+    return report
+
+
+def follow(path, as_json=False, interval=2.0, sleep=time.sleep):
+    """Print the task's status as it changes until it is done, blocked or failed."""
+    report = reporter(as_json)
+    while True:
+        current = monitor.record(path)
+        report(current)
+        if current["state"] != "running":
+            if not as_json:
+                print("\n".join(monitor.render(current)), flush=True)
+            return {"done": 0, "blocked": 2}.get(current["state"], 1)
+        sleep(interval)
+
+
+def masked(settings):
+    """Settings for printing: a webhook URL can carry a secret, so its value is never shown."""
+    return {name: "(set)" if name == "webhook" and value else value for name, value in settings.items()}
+
+
 def authorize(project, memory_task=None, memory_command=False):
     caller = os.environ.get("HW_CALLER_TERMINAL")
     if caller is None:
@@ -103,8 +170,28 @@ def main(argv=None):
     command.add_argument("--project", help="also search this Project's repository and its rules for skills")
     command = sub.add_parser("setup", help="sign in and add a first Project; safe to run again")
     command.add_argument("--check", action="store_true", help="only report what is missing")
-    command = sub.add_parser('status')
-    command.add_argument('project', nargs='?')
+    command = sub.add_parser('run', help='one command: build, check and verify a task, ending with a draft pull '
+                                         'request or a verified branch')
+    command.add_argument('-p', '--project', required=True)
+    command.add_argument('text', nargs='?', help='what you want, with a done check')
+    command.add_argument('--file', type=Path, help='read the request from a file')
+    command.add_argument('--resume', metavar='TASK_ID', help='continue a blocked, failed or interrupted task')
+    command.add_argument('--base', help='branch to start from instead of the Project base')
+    command.add_argument('--kind', choices=['build', 'spike'], default='build')
+    command.add_argument('--max-minutes', type=float, help='stop the task after this much running time')
+    command.add_argument('--max-tokens', type=int, help='stop the task once its agents report this many input, output '
+                                                         'and reasoning tokens (cached input is not counted)')
+    command.add_argument('--detach', action='store_true', help='run in the background; follow with hw watch')
+    command.add_argument('--json', action='store_true', help='print each status change as a JSON line')
+    command = sub.add_parser('status', help='what is running; with a task id, that task\'s stage, elapsed time, '
+                                            'tokens and last action')
+    command.add_argument('project', nargs='?', metavar='PROJECT|TASK_ID')
+    command.add_argument('-p', dest='within', metavar='PROJECT', help='the Project, when two share a task prefix')
+    command.add_argument('--json', action='store_true')
+    command = sub.add_parser('watch', help='follow a task until it is done, blocked or failed')
+    command.add_argument('project', nargs='?', metavar='TASK_ID', help='default: the newest open task')
+    command.add_argument('-p', dest='within', metavar='PROJECT')
+    command.add_argument('--json', action='store_true', help='print each status change as a JSON line')
     command = sub.add_parser('automations')
     command.add_argument('action', nargs='?', choices=['tick'])
     command.add_argument('--at', type=float, help='Unix timestamp for a controlled tick')
@@ -160,6 +247,8 @@ def main(argv=None):
     command.add_argument("--file", type=Path)
     command.add_argument("--number", type=int, help="redeliver an existing message number")
     command.add_argument("--base", help="start this task from another branch instead of the Project base")
+    command.add_argument("--task", metavar="TASK_ID", help="send it to this task; a hw run task gives it to a builder "
+                                                           "and, if it was blocked, resumes")
     command = sub.add_parser("read")
     command.add_argument("project")
     command.add_argument("--since", type=int, default=0)
@@ -203,15 +292,72 @@ def main(argv=None):
         from .help import text
         print(text(), end="")
         return 0
-    args = parser.parse_args(argv)
+    words = list(sys.argv[1:] if argv is None else argv)
+    # Python 3.12+ drops a leading "--" before the command; 3.11 rejects it. Treat both alike.
+    args, extra = parser.parse_known_args(words[1:] if words[:1] == ["--"] else words)
+    # Python 3.11 argparse leaves an optional positional unfilled when an option sits before it
+    # (hw say P --task HE-2 "text"); 3.12+ fills it. Fill it the same way on every version.
+    # parse_intermixed_args would do this, but it raises TypeError on a parser with subcommands (3.11 and 3.13).
+    slot = {"say": "text", "run": "text", "status": "project", "watch": "project"}.get(args.command)
+    if extra and slot and getattr(args, slot) is None and len(extra) == 1 and not extra[0].startswith("-"):
+        setattr(args, slot, extra.pop())
+    if extra:
+        parser.error("unrecognized arguments: " + " ".join(extra))
     try:
-        if hc.owner_mutation(list(argv) if argv is not None else sys.argv[1:]):
+        # Starting a run and answering one are the owner's decisions, never an agent's. This is decided
+        # from the parsed command, so no abbreviation or `--` spelling of the command line can skip it.
+        if (hc.owner_mutation(list(argv) if argv is not None else sys.argv[1:])
+                or args.command == 'run' or (args.command == 'say' and args.task)):
             hc.require_owner()
         if args.command in ('automation', 'automations') and os.environ.get('HW_CALLER_TERMINAL') is not None:
             raise ValueError('automations are governed by the owner outside Herdworks sessions')
-        authorize(getattr(args, "project", None), getattr(args, "task", None), args.command == "memory")
-        if args.command == 'status':
-            print('\n'.join(tree(args.project)))
+        target = None
+        if args.command in ('status', 'watch'):
+            # A task id names its own Project, so the caller is checked against that Project.
+            if args.project and TASK_ID.fullmatch(args.project):
+                target = find_task(args.project, args.within)
+            elif args.command == 'watch':
+                if args.project:
+                    raise ValueError('watch follows a task id such as HE-1')
+                target = newest_task(args.within)
+            args.project = target.parents[1].name if target else args.project or args.within
+        authorize(getattr(args, "project", None), getattr(args, "task", None) if args.command == "memory" else None,
+                  args.command == "memory")
+        if args.command == 'watch':
+            return follow(target, args.json)
+        elif args.command == 'status':
+            if target:
+                current = monitor.record(target)
+                print(json.dumps(current, indent=2) if args.json else '\n'.join(monitor.render(current)))
+            elif args.json:
+                print(json.dumps([monitor.record(path) for path in open_tasks(args.project)], indent=2))
+            else:
+                print('\n'.join(tree(args.project)))
+        elif args.command == 'run':
+            from . import drive
+            project = project_path(args.project)
+            if args.resume:
+                if args.text is not None or args.file or args.base:
+                    raise ValueError('--resume continues an existing task; it takes no request or base')
+                path = task_path(args.project, args.resume)
+                if not (path / 'task.json').is_file():
+                    raise ValueError(f'no task {args.resume} in Project {args.project}')
+                drive.set_budget(path, args.max_minutes, args.max_tokens)  # refuses a task hw run does not drive
+            else:
+                if args.file and args.text is not None:
+                    raise ValueError('use text or --file')
+                path = drive.create(project, args.file.read_text() if args.file else args.text, args.base, args.kind,
+                                    args.max_minutes, args.max_tokens)
+            if args.detach:
+                drive.detach(path)
+                print(f'{path.name} is running in the background. Follow it with: hw watch {path.name}')
+                return 0
+            if not args.json:
+                print(f'{path.name} on branch hw/{path.name}. From another terminal: hw status {path.name}', flush=True)
+            final = drive.drive(path, announce=reporter(args.json))
+            if not args.json:
+                print('\n'.join(monitor.render(final)), flush=True)
+            return drive.EXIT.get(final['state'], 1)
         elif args.command == 'automations':
             if args.action == 'tick':
                 for entry in automations.tick(args.at):
@@ -269,7 +415,7 @@ def main(argv=None):
             from .setup import setup
             return setup(check_only=args.check)
         elif args.command == "config":
-            print(json.dumps(config(), indent=2))
+            print(json.dumps(masked(config()), indent=2))
         elif args.command == "project":
             if args.action == "add":
                 if args.github:
@@ -278,8 +424,8 @@ def main(argv=None):
                     path = add_project(args.project, args.repo, args.base or "main", args.prefix)
                 print(f"added Project {path.name}")
             else:
-                print(json.dumps(grant_project(project_path(args.project), args.push,
-                                               args.draft_pr, args.remote, args.gh, args.unsandboxed)))
+                print(json.dumps(masked(grant_project(project_path(args.project), args.push,
+                                                      args.draft_pr, args.remote, args.gh, args.unsandboxed))))
         elif args.command == "up":
             result = up(project_path(args.project))
             print(f"started {result['name']}")
@@ -287,8 +433,28 @@ def main(argv=None):
             if args.file and args.text is not None:
                 raise ValueError("use text or --file")
             text = args.file.read_text() if args.file else args.text
-            number, repeat = say(project_path(args.project), text, args.number, base=args.base)
-            print(f"delivered {number}" + (" repeat" if repeat else ""))
+            project = project_path(args.project)
+            # Only --task routes a message to a task. A redelivery was routed when it was first sent.
+            target = route(project, args.task) if args.task and args.number is None else None
+            if target:
+                from . import drive
+                number = answer(project, target, text)
+                watch = f"Follow it with: hw watch {target.name}"
+                if monitor.record(target)["state"] == "running":
+                    print(f"delivered {number} to {target.name}: it is running and will not be done before a builder "
+                          f"has read this. {watch}")
+                else:
+                    try:
+                        drive.detach(target)
+                    except (OSError, ValueError, RuntimeError) as error:
+                        # The answer is saved; sending it again would save a second copy.
+                        raise RuntimeError(f"answer {number} is saved for {target.name}, but the task was not resumed: "
+                                           f"{error}. Do not send it again; continue with: "
+                                           f"{drive.commands(target)['resume']}") from None
+                    print(f"delivered {number} to {target.name} and resumed it. {watch}")
+            else:
+                number, repeat = say(project, text, args.number, base=args.base, about=args.task)
+                print(f"delivered {number}" + (" repeat" if repeat else ""))
         elif args.command == "read":
             if args.latest:
                 print(latest(project_path(args.project)))
@@ -317,6 +483,10 @@ def main(argv=None):
             print(f"{path.name}" + (" repeat" if repeat else "") + (f" queued: {reason}" if reason else ""))
         else:
             path = task_path(args.project, args.task_id)
+            if (args.command in ("spawn", "gate", "reap", "pr") and os.environ.get("HW_CALLER_TERMINAL") is not None
+                    and (path / "task.json").is_file() and read_task(path).get("driver") == "run"):
+                raise ValueError(f"{args.task_id} is driven by hw run, not by the coordinator; "
+                                 f"report its state from: hw status {args.task_id}")
             if args.command == "spawn":
                 print(json.dumps(spawn(path, args.role, replaces=args.replaces)))
             elif args.command == "pr":
@@ -338,6 +508,8 @@ def main(argv=None):
                 for name in reap(path):
                     print(f"reaped {name}")
         return 0
+    except KeyboardInterrupt:
+        return 130
     except (OSError, ValueError, RuntimeError, KeyError) as error:
         print(f"hw: {error}", file=sys.stderr)
         return 1

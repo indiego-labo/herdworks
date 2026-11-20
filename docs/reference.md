@@ -3,17 +3,174 @@
 Everything `hw` does, in detail. Start with the [README](../README.md) if you are new.
 
 Python 3.11 and the standard library are sufficient. Install role templates, add a
-Project for a clean repository, then send it a task:
+Project for a clean repository, then give it a task, either in one command or through its
+coordinator:
 
 ```sh
 hw install
 hw project add hello --github owner/hello
 hw project add local --repo /absolute/hello --base main --prefix HE
-hw up hello
+hw run -p hello --file /absolute/shout.md      # one command; see below
+hw up hello                                    # or: start the coordinator and talk to it
 hw say hello --file /absolute/shout.md
 hw read hello --since 0
 hw tasks hello
 ```
+
+## One-command runs
+
+```sh
+hw run -p hello "Add a --shout flag. Done when python3 hello.py --shout Ada prints HELLO, ADA!"
+hw run -p hello --file /absolute/brief.md --base feature/x --max-minutes 60 --max-tokens 2000000
+hw run -p hello --detach "..."         # in a herdr core terminal; returns at once
+hw run -p hello --resume HE-2          # continue a blocked, failed or interrupted task
+hw status HE-2 [--json]                # one task's status record
+hw status [PROJECT] [--json]           # every open task
+hw watch [HE-2] [--json]               # follow until done, blocked or failed (default: newest open task)
+hw say hello --task HE-2 "the polite one"   # tell a task something: a blocked one resumes, a running one hands it to a builder
+```
+
+`hw run` creates the task and drives it itself, as a plain loop with no coordinator agent:
+builder, the Project's `checks` command (before any verifier is spent), verifier, evidence
+reviewer, gate, then a draft pull request when the Project grants `push` and `draft-pr`, else
+the verified local branch. Each turn it reads the task's records and does the one next thing
+they call for with the same tools the coordinator uses (`spawn`, `gate`, `reap`, `pr`), so every
+existing cap applies: three fix rounds, two replacements of a stalled or dead worker per step,
+one rerun of an inconclusive verifier, `max_sessions_per_task` and `max_same_reason_failures`.
+`--resume` is the same loop, so it continues from whatever already exists. A worker that died or
+was stopped without its artifact is replaced; a replacement builder continues from whatever the
+lost builder had already committed on the task's branch. The checks command runs once per commit:
+a pass before the verifier is the result the gate records.
+
+It ends in one of three states and exits 0, 2 or 1:
+
+| State | Meaning | Exit |
+| --- | --- | --- |
+| `done` | Draft pull request opened, or the commit is verified on branch `hw/TASK`. | 0 |
+| `blocked` | Stopped on purpose and waiting for a person: a builder's question, a budget, a repeated gate refusal, an exhausted cap, `hw stop`, or Ctrl-C. | 2 |
+| `failed` | The loop itself hit an error (a launch that could not be confirmed, a git failure). | 1 |
+
+Blocked and failed records carry `reason` and `next_step`, the exact command to continue.
+Ctrl-C stops only the loop; its workers keep running and `--resume` picks them up. `hw stop
+PROJECT TASK` ends the workers, and the run then reports blocked.
+
+### Status record
+
+`hw run` saves `status.json` in the task folder after every step. `hw status TASK` prints it
+with the live facts read fresh; `--json` gives the same record to a script:
+
+| Field | Content |
+| --- | --- |
+| `task`, `project`, `driver` | `driver` is `run` or `coordinator`. |
+| `state`, `stage` | `running`, `blocked`, `done` or `failed`; stage is `queued`, `build`, `verify`, `evidence`, `gate`, `pr` or `done`. |
+| `status` | The word `hw tasks` shows (`in progress`, `verified`, `stopped`, ...). |
+| `reason`, `next_step` | Why it stopped and what to run next; for `done`, the result. |
+| `started_at`, `ended_at`, `elapsed_seconds` | Elapsed is running time: time spent blocked does not count. |
+| `last_action`, `last_action_at` | The newest fact in the task's timeline: a worker started or reported, a gate answer, a stop. |
+| `tokens` | Per role and `total`: input, output and reasoning tokens, as the agents report them. `"unknown"` when an agent reports none, and `partial: true` when the total leaves a session out. `cached` is the cache reads and writes reported beside them, in no total. `includes_cached: true` means a Codex session is counted (see below). Never estimated. |
+| `sessions` | Each worker: role, agent, model, seconds, state and its token counts. opencode: `input`, `output`, `reasoning`, `cache_read`, `cache_write` and `total` (the first three). Codex: `total` and `includes_cached: true`. |
+| `budget`, `branch`, `commit`, `pr_url`, `webhook` | The limits in force, where the work is, and the last webhook delivery. |
+
+Token counts are read from the agent's own records for the worker's folder: opencode's session
+database and Codex's thread database. A total is what was spent: input, output and reasoning
+tokens. Cached input is never added in. An agent re-reads its whole context from the cache on
+every turn, so cache reads run to many times the fresh input; they are shown beside the total
+(`tokens=247,497 cached=4,265,216`) and count against no budget.
+
+Codex is the exception, and its figure is labelled. Its database keeps one number per thread,
+`tokens_used`: Codex's running total of input and output tokens, in which input counts the
+cached context again on every turn. Herdworks cannot split it, so a Codex session's `total` is
+that number as Codex gives it, marked `includes_cached: true` and printed as `(Codex's figure,
+cached input included)`; a task total with such a session in it says `(with Codex's figures,
+which count cached input)`. Expect it to be several times what the same work shows under opencode,
+and set a `max_tokens` for Codex workers with that in mind.
+
+`hw status TASK` also works for a task the coordinator drives; its record is derived from the
+task's events, with elapsed time counted from the task's creation. A running `hw run` holds a
+lock file in the task folder; if that process dies the lock goes with it, and the record reads
+`blocked` with the resume command. Only sessions that began with the worker are counted, so an
+older session from a reused folder path never adds to a task's tokens.
+
+Plain `hw status [PROJECT]` lists every open task under its Project. A `hw run` task is shown
+with its record's state, and below it the reason and the next step when it is blocked or failed
+(the result when it is done), so a task waiting on your answer, a budget or a resume is never
+hidden. A coordinator's task shows the word `hw tasks` shows; one that was stopped is left out.
+
+### Budgets
+
+`max_minutes` and `max_tokens` are off unless set. Set them per task with `hw run --max-minutes N
+--max-tokens N` (also accepted with `--resume`, to raise them), per Project in `project.json`, or
+for every Project in `config.json`; the nearest one wins. `hw run` checks them every few seconds.
+When one is reached it stops the task's workers, marks the task `blocked` with the reason and
+sends the webhook with `"event": "budget"`. `spawn` also refuses to start a worker for any task
+that is over budget, so a coordinator-driven task is capped too (its minutes count from the
+task's creation). Only a running `hw run` stops workers: for a coordinator's task, or after the
+`hw run` process has died, a worker already started keeps going until it ends and no further one
+starts. A token budget is held to the `total` above: input, output and reasoning tokens, never
+cached input (except inside a Codex session's figure, as described there). It only counts tokens
+an agent reports: sessions whose count is `unknown` cannot be held to it, and the status says
+which those are. Time a task spends held by a machine
+limit counts as running time. A blocked task keeps its place under `max_tasks_at_once` until it
+finishes or you end it with `hw stop`.
+
+### Webhook
+
+Add `"webhook": "https://example.com/hook"` to a Project's `project.json` (or to `config.json`).
+When a `hw run` task becomes `done`, `blocked` or `failed`, or hits a budget, Herdworks sends one
+JSON `POST` with `event` (`done`, `blocked`, `failed` or `budget`), `at`, and these record
+fields: `project`, `task`, `state`, `stage`, `status`, `reason`, `next_step`, `started_at`,
+`ended_at`, `elapsed_seconds`, `last_action`, `last_action_at`, `tokens`, `budget`, `branch`,
+`commit`, `pr_url`. It uses Python's standard library, waits at most ten seconds and never
+retries. A delivery failure is recorded on the task (`webhook: not delivered (HTTP 500)`) and
+never changes the task's outcome. The URL is treated as a secret: it is never written to the
+task's records, the status or the output, and text in the payload is redacted the same way as
+pull request bodies. A result names the commit and the branch, never the repository's folder on
+this machine. `tokens` in the payload is the same object as in the status: totals without
+cached input, and `cached` beside them.
+
+### Messages to a task
+
+`hw say PROJECT --task TASK "..."` addresses one task. For a coordinator's task it is delivered
+to the coordinator as `MESSAGE N about TASK`. For a `hw run` task the text is saved as an answer,
+and a builder always gets to read it:
+
+- a blocked task resumes in the background, and its next builder's brief carries the answer;
+- a running task keeps going, and cannot be `done` before a builder has read it. If the answer
+  arrives while a builder, the verifier or the evidence reviewer is working, that worker ends its
+  turn; then, instead of verifying further or finishing, `hw run` starts a builder on the same
+  branch with the answer in its brief, and verification starts again from what that builder
+  reports. A builder that finds nothing to change reports the same commit, which is then verified
+  again with the answer in the verifier's brief. Each such answer costs one builder session;
+- a task that stops for another reason first (a budget, `hw stop`, an escalation, a cap that
+  keeps the builder from starting) ends `blocked` with that reason. The answer stays saved and
+  goes to a builder when the task continues;
+- no pull request is opened, by `hw run` or by `hw pr`, while an answer waits for a builder.
+
+A message is never recorded and then ignored. With `--task`:
+
+- a closed task is refused: the error says it is closed and to start a follow-up with `hw run`;
+- an id that is not a task of the Project is refused, with `hw tasks PROJECT` as the next step;
+- a finished `hw run` task (verified, or its pull request opened) is refused, with the follow-up
+  command.
+
+If the answer is saved but the task cannot be resumed, the error says so and gives the resume
+command: do not send the answer again.
+
+Only `--task` routes a message. Text that merely mentions a task id (`hw say PROJECT "like HE-3,
+add tests"`) goes to the coordinator as written, whatever state that task is in, and is never an
+answer to a `hw run` task.
+
+`hw run` and `hw say --task` are the owner's commands: an agent session calling them is refused.
+A `hw run` task takes its answers from the Project's `inbox.jsonl` alone, and only messages sent
+with `--task` for that task count; they are never redelivered to the coordinator. The copy of an
+answer under `coordinator/tasks/TASK/answers/` is for reading: a file an agent writes or rewrites
+there is neither an answer nor quoted in a brief. This rests on agent sessions being unable to
+write the Project folder, which the sandbox enforces; with the sandbox off (`--unsandboxed`,
+which opencode needs) no record on the machine is protected from an agent, this one included.
+The coordinator cannot start workers, run the gate or open a pull request for a `hw run` task;
+those calls are refused and it reports from `hw status TASK`.
+
+## Projects and the coordinator
 
 `HW_HOME` selects the data directory; the default is `~/.herdworks`. A Project keeps
 `project.json`, `memory/`, `tasks/`, `inbox.jsonl` and `coordinator/` there.

@@ -74,7 +74,7 @@ class LaunchTests(RunCase):
                     'def attempt(label, action):\n'
                     ' try:\n  action()\n  denied[label] = False\n'
                     ' except PermissionError:\n  denied[label] = True\n'
-                    'for target in (run / "events.jsonl", run / "task.json",\n'
+                    'for target in (run / "events.jsonl", run / "task.json", run.parents[1] / "inbox.jsonl",\n'
                     f'               Path({str(self.notes / "forged")!r}), run / "other-1/forged",\n'
                     '               folder / "alias/events.jsonl"):\n'
                     ' attempt(str(target), lambda: target.write_text("forged"))\n'
@@ -205,6 +205,22 @@ class LaunchTests(RunCase):
         self.assertIn("check_for_update_on_startup=false", args)
         self.assertIn(str(self.root), args)
         self.assertIn('projects={' + json.dumps(str(self.repo)) + '={trust_level="trusted"}}', args)
+
+    def test_no_codex_session_may_write_the_project_inbox(self):
+        """A `hw run` task takes its answers from the Project's inbox.jsonl, so no session's sandbox may reach it."""
+        env = self.fake("codex")
+        inbox = self.project / "inbox.jsonl"
+        places = [("coordinator", self.project / "coordinator"), ("worker", self.path / "build-1/wt"),
+                  ("verify", self.path / "verify-1/wt"), ("verify", self.path / "evidence-1/work")]
+        for mode, cwd in places:
+            with self.subTest(mode=mode, cwd=cwd.name):
+                cwd.mkdir(parents=True, exist_ok=True)
+                result = subprocess.run([str(ROOT / "bin/hw-codex"), mode], cwd=cwd, env=env, capture_output=True, text=True, check=True)
+                args = json.loads(result.stdout)
+                writable = [cwd] + [Path(args[index + 1]) for index, word in enumerate(args) if word == "--add-dir"]
+                self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", args)
+                self.assertEqual([str(root) for root in writable if inbox.is_relative_to(root)], [])
+                self.assertIn(cwd.parent if mode != "coordinator" else cwd, writable)
 
     def test_coordinator_cannot_request_wider_access(self):
         env = self.fake("codex")

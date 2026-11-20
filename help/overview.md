@@ -1,16 +1,27 @@
 # Herdworks (hw)
 
-Give a coding task to a Project the way you would message a teammate. A coordinator plans it,
-one agent builds it, a different agent checks it works, and you get a draft pull request.
+Give a coding task to a Project in one command. One agent builds it, a different agent checks
+it works, and you get a draft pull request (or a verified branch) with the proof.
 
 ## Everyday commands
+
+    hw run -p PROJECT "what you want. Done when ..."   build, check, verify; ends done, blocked or failed
+    hw run -p PROJECT --detach "..."                 the same in the background
+    hw status TASK                                   stage, elapsed, tokens, last action, branch or pull request
+    hw watch [TASK]                                  follow a task until it ends
+    hw run -p PROJECT --resume TASK                  continue a blocked or interrupted task
+    hw say PROJECT --task TASK "your decision"       answer a blocked task (it resumes), or tell a running one more
+    hw status                                        every open task; a blocked one shows why and what to run
+    hc attach NAME                                   watch an agent live (names from hw status)
+
+Budgets: add --max-minutes N or --max-tokens N to hw run. --json on run, status and watch.
+
+## Talking to a coordinator instead
 
     hw say PROJECT "what you want. Done when ..."   give a task, or answer a question
     hw read PROJECT                                  the coordinator's replies
     hw wait PROJECT                                  wait for the next reply, then print it
     hw tasks PROJECT                                 every task and its status
-    hw status                                        what is running now
-    hc attach NAME                                   watch an agent live (names from hw status)
 
 Each reply starts with its kind: REPLY (progress), QUESTION (it needs your decision; answer
 with hw say), DONE (finished, with the pull request) or PROBLEM (needs the owner).

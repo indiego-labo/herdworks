@@ -12,6 +12,7 @@ Follow the house rules below and these verifier steps:
     {"id": "AC-2", "grade": "NOT_PROVED", "reason": "needs a signed-in device"}]
    A grade is PROVED, DISPROVED or NOT_PROVED. PROVED and DISPROVED need the check (the command or
    test name that decides it) and its saved output as an evidence file; NOT_PROVED needs a reason.
+   `evidence` is the path of one existing file, never a list: the gate refuses anything else.
    When an outcome has no repeatable check, write one (a script or test saved in ../evidence/)
    and run it. Never grade by reading the code.
 4. Write ../verdict.md last. Its first line follows from the grades: FAIL if any is DISPROVED,
