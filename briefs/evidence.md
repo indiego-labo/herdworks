@@ -20,9 +20,10 @@ Before writing review.md, save ../visuals.json with this structure:
 Use the SHA-256 of each inspected file (for example, run shasum -a 256 FILE). List only files
 directly under the verifier's evidence directory. Use source "stand-in" for fixture demonstrations
 or substitutes for the target environment. If a relevant capture is missing or unsafe to publish,
-state the reason in "unavailable". For interactions include a GIF if the Project cannot use native
-GitHub CLI attachments. Skip visuals.json for work with no relevant visuals. This selection is
-for PR presentation and does not change any claim grade or blocker.
+state the reason in "unavailable". For interactions, compare the displayed before and after
+states in the selected media with the recorded interaction. Include an animated GIF if the
+Project cannot use native GitHub CLI attachments. Skip visuals.json for work with no relevant
+visuals. This selection is for PR presentation and does not change any claim grade or blocker.
 
 If the environment blocks your own check, use INCONCLUSIVE and one line per requirement:
 `BLOCKED-BY-ENVIRONMENT: REQUIREMENT; missing PREREQUISITE`. Inspect all other checks and

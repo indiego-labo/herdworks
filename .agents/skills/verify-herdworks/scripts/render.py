@@ -90,8 +90,9 @@ def video(manifest, output, duration):
         concat.append(f"file '{target.name}'")
         listing = folder / "frames.txt"
         listing.write_text("\n".join(concat) + "\n")
+        # Fill the concat holds before applying the output duration, including the final screen.
         subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
-                        "-i", str(listing), "-vf", "scale=1600:-2", "-r", "12", "-t", str(duration),
+                        "-i", str(listing), "-vf", "fps=12,scale=1600:-2", "-t", str(duration),
                         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(output)], check=True)
 
 

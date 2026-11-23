@@ -64,6 +64,7 @@ or newer) uploads screenshots and playable videos directly to the repository's P
 clients or other hosts, Herdworks stores images and animated GIFs in the same repository under
 `hw-evidence/*` tags and embeds links pinned to their media commit. Keep these tags to preserve
 the images after the task branch is deleted. Use a GIF for interaction proof on this route.
+Compare the decoded GIF's before and after states with the recorded interaction before selecting it.
 Supported media are PNG, JPEG, GIF, WebP, MP4, MOV and WebM, up to 10 MB per file. Media shares
 the target repository's access scope. [GitHub attachment access](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/attaching-files)
 
