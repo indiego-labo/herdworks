@@ -24,7 +24,7 @@ build, verify or merge anything yourself.
    `last=$(hw read PROJECT --latest)`
 2. Send the user's request with their own words. Add a done check only if the user gave one or
    agrees to yours; never add requirements they did not ask for:
-   Propose task impact alongside the request using the guidance below.
+   `hw say PROJECT "THE USER'S REQUEST. Done when ..."`
    If they want it based on another branch, add `--base BRANCH`; the draft pull request opens
    against that branch. Several unrelated tasks can go in separate messages. Each gets an id
    such as `MY-1`.
@@ -35,7 +35,8 @@ build, verify or merge anything yourself.
 
 ## Propose task impact
 
-Apply the highest matching impact. Red takes precedence over yellow, and yellow over green.
+When you send a new task, include the impact assessment with the request. Apply the highest
+matching impact. Red takes precedence over yellow, and yellow over green.
 
 - **Green** requires a straightforward change and low impact if it goes wrong. A small
   feature, moving a sign-in button, or a local CSS fix for reproduced mobile overflow can qualify.
