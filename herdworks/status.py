@@ -1,9 +1,9 @@
 import json
 import time
-from . import hc
+from . import hc, impact
 from .home import hw_home
 from .projects import project_path, read_project, task_paths
-from .runs import derive_status, events
+from .runs import derive_status, events, read_task
 from .talk import coordinator_name, status_word
 from .probe import newest_file
 
@@ -36,7 +36,7 @@ def tree(project=None, now=None):
             state = derive_status(task)
             if state == 'stopped':
                 continue
-            yield f'|-- {task.name} {state}'
+            yield f'|-- {task.name} {state}' + impact.label(read_task(task).get('impact'))
             for event in events(task):
                 if event.get('event') != 'session' or event.get('role') == 'coordinator':
                     continue

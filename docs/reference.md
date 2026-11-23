@@ -42,6 +42,29 @@ a repeat acknowledgement. A blocked coordinator is reported without forced input
 `say hello --base feature/x "..."` records `feature/x` with that message: the task starts
 from the newest remote `feature/x` and its draft pull request opens against that branch.
 
+A Bot can propose impact when it sends a task:
+
+```sh
+hw say hello "Fix the mobile overflow" --impact green --impact-reason "Reproduced with a straightforward CSS fix"
+hw tasks hello
+hw task impact hello HE-1 yellow --reason "The fix requires a data migration"
+hw task correct-impact hello HE-1 red --reason "The user confirmed an architecture redesign"
+```
+
+Use green for straightforward features, UI tweaks, and reproduced bugs with straightforward fixes.
+Data or database changes and deployment beyond existing CI/CD are yellow. Major architectural
+changes, redesigns and work requiring Architect or Arena are red. The highest applicable color
+wins. Use `unknown` with a reason when missing facts prevent a classification, such as an
+unreproduced symptom with no confirmed scope. See `hw help agent` for Bot guidance.
+
+The two `say` flags are optional and go together. They record the proposal separately from
+the user's words. `task new --message NUMBER` attaches it to the associated task, and
+`tasks` and `status` display its level, reason and source. Replaying intake preserves the
+current assessment. The Bot or coordinator can update a proposal as facts change. Run
+`correct-impact` outside Herdworks sessions as the owner to record or revise a correction.
+A proposal update cannot overwrite an owner correction. Impact records scope and leaves
+the existing verification, deployment and merge authority in effect.
+
 Replies are numbered `.md` files under `coordinator/outbox/`, beginning `REPLY`, `QUESTION`
 or `DONE`. `read --since N` returns only reply numbers greater than N. The coordinator
 keeps task notes in `coordinator/tasks/HE-1/`. A QUESTION leaves the task `waiting on you`;

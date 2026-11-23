@@ -2,6 +2,7 @@ import json
 import shlex
 import time
 from . import hc
+from .impact import proposal
 from .limits import role_settings
 from .projects import read_project, task_paths
 from .runs import ROOT, locked
@@ -79,8 +80,10 @@ def inbox(project):
     return [json.loads(line) for line in (project / "inbox.jsonl").read_text().splitlines() if line]
 
 
-def say(project, text=None, number=None, root=ROOT, delivery_key=None, base=None):
+def say(project, text=None, number=None, root=ROOT, delivery_key=None, base=None,
+        *, impact=None, impact_reason=None):
     data = read_project(project)
+    proposed = proposal(impact, impact_reason)
     if text is not None and not text.strip():
         raise ValueError("message must not be empty")
     if base is not None:
@@ -104,6 +107,8 @@ def say(project, text=None, number=None, root=ROOT, delivery_key=None, base=None
                 raise ValueError("repeat must use the original text")
             if base is not None and base != entry.get("base"):
                 raise ValueError("repeat must use the original base branch")
+            if proposed is not None and proposed != entry.get("impact"):
+                raise ValueError("repeat must use the original impact proposal")
         else:
             if text is None:
                 raise ValueError("message text is required")
@@ -113,6 +118,8 @@ def say(project, text=None, number=None, root=ROOT, delivery_key=None, base=None
                 entry["base"] = base
             if delivery_key is not None:
                 entry["delivery_key"] = delivery_key
+            if proposed is not None:
+                entry["impact"] = proposed
             with (project / "inbox.jsonl").open("a") as stream:
                 stream.write(json.dumps(entry) + "\n")
         if current.get("state") != "live" or (project / ".coordinator-pending.json").exists():

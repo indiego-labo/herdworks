@@ -24,7 +24,8 @@ build, verify or merge anything yourself.
    `last=$(hw read PROJECT --latest)`
 2. Send the user's request with their own words. Add a done check only if the user gave one or
    agrees to yours; never add requirements they did not ask for:
-   `hw say PROJECT "THE USER'S REQUEST. Done when ..."`
+   Propose a task impact and a short reason alongside the request:
+   `hw say PROJECT "THE USER'S REQUEST. Done when ..." --impact green --impact-reason "Reproduced mobile overflow with a local CSS fix"`
    If they want it based on another branch, add `--base BRANCH`; the draft pull request opens
    against that branch. Several unrelated tasks can go in separate messages. Each gets an id
    such as `MY-1`.
@@ -32,6 +33,27 @@ build, verify or merge anything yourself.
    told when it ends, and keep talking to the user meanwhile):
    `hw wait PROJECT --since "$last" --timeout 3600`
 4. Tell the user it is handed over and that you will report when the Project replies.
+
+## Propose task impact
+
+Apply the highest matching impact. Red takes precedence over yellow, and yellow over green.
+
+- **Green** covers straightforward features and UI tweaks, and reproduced bugs with a straightforward fix.
+- **Yellow** covers changes to data or a database, including migrations, and deployment beyond existing CI/CD.
+- **Red** covers major architectural changes, redesigns, and work that requires Architect or Arena.
+- Use **unknown** when missing facts prevent a classification. For an unreproduced password-manager symptom,
+  say what needs investigation in the reason. A known migration still warrants yellow, or red if red criteria apply.
+
+Keep the reason to one short line and keep the user's request in the message body. The
+proposal appears in `hw tasks PROJECT` and `hw status PROJECT` after the coordinator creates the task.
+Report the recorded impact and reason to the user. Both intake flags are optional for existing callers.
+
+When discovery or scope changes your assessment, run
+`hw task impact PROJECT TASK_ID yellow --reason "Discovery showed a database migration is required"`.
+For a user's explicit correction, use the owner's shell outside Herdworks sessions to run
+`hw task correct-impact PROJECT TASK_ID red --reason "The user confirmed an architecture redesign"`.
+The task shows that it is an owner correction. Further changes to that correction use the same owner command.
+The impact records an assessment. The existing verification, deployment and merge rules apply at every level.
 
 ## When `hw wait` ends
 

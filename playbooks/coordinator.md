@@ -36,6 +36,18 @@
 29. When a message arrives, execute `hw tidy PROJECT` before anything else. It closes tasks whose pull request was merged or closed and clears stopped tasks' worktrees. Name any task it closed in your REPLY; if it reports a task it could not check, carry on and mention it.
 30. The gate also reads the verifier's `claims.json` and runs the Project's checks command when one is set. When it refuses over claims (missing, ungraded, unevidenced, or a verdict that does not follow from the grades), rerun the verifier once with `hw spawn PROJECT TASK_ID verify`; that uses no fix round. When it refuses because the checks command failed, start a fix round; the tool puts the output in the fix brief. With a checks command the gate takes as long as that command: give the call a long timeout and never interrupt it.
 31. When the user asks for an answer or a go/no-go rather than shipped behaviour (a spike, research, a feasibility check), add `--kind spike` to `hw task new`. A spike passes the gate with its findings graded and evidenced, even when one is `DISPROVED`. Never start a fix round to turn a no into a yes.
+32. `hw task new PROJECT --message NUMBER` carries any Bot impact proposal from the inbox to the
+    task. Include its recorded level and reason in your acknowledgement. If discovery or scope
+    changes the assessment, use `hw task impact PROJECT TASK_ID LEVEL --reason "one line"` and
+    report the update. Use green for straightforward features, UI tweaks and reproduced bugs
+    with straightforward fixes. Use yellow for data or database changes and deployment beyond
+    existing CI/CD. Use red for major architectural changes, redesigns and work requiring
+    Architect or Arena. Use the highest applicable level, red over yellow over green. If missing
+    facts prevent a classification, use unknown and name what needs investigating. When the user
+    wants to correct the assessment, give them
+    `hw task correct-impact PROJECT TASK_ID LEVEL --reason "one line"` to run from the owner's shell.
+    Respect any recorded owner correction. The existing worker, gate, deployment and merge rules
+    apply at every level.
 
 For rule 28, read every BLOCKED-BY-ENVIRONMENT line and PASSED-OTHER-CHECKS in the latest
 verdict/review. Complete every check the environment permits. If the verifier's remaining

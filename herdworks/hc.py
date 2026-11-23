@@ -116,7 +116,7 @@ def require_owner():
 
 def owner_mutation(argv):
     return (argv[:2] in (['automation', 'add'], ['automation', 'on'], ['automation', 'off'],
-                         ['automations', 'tick'], ['project', 'grant']))
+                         ['automations', 'tick'], ['project', 'grant'], ['task', 'correct-impact']))
 
 
 def forward(entrypoint, argv):
