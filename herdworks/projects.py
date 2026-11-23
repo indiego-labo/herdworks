@@ -236,6 +236,7 @@ def new_task(project, brief=None, message=None, roles=None, stuck_after=None, ba
     with locked(project.parents[1]), locked(project):
         memory_before = sync(project)
         paths = task_paths(project)
+        impact = None
         if message is not None:
             inbox = [json.loads(line) for line in (project / "inbox.jsonl").read_text().splitlines()]
             entry = next((m for m in inbox if m["number"] == message), None)
@@ -247,6 +248,7 @@ def new_task(project, brief=None, message=None, roles=None, stuck_after=None, ba
                     return item.parent, True
             text = entry["text"]
             base = base or entry.get("base")
+            impact = entry.get("impact")
         elif brief is not None:
             text = Path(brief).read_text()
         else:
@@ -263,6 +265,8 @@ def new_task(project, brief=None, message=None, roles=None, stuck_after=None, ba
                         base=base_commit, base_branch=base_branch,
                         branch=f"hw/{task_id}", created_at=time.time(), message=message,
                         memory_before=memory_before)
+        if impact is not None:
+            metadata["impact"] = impact
         reason = hold_reason(path, allocating=True)
         if reason:
             metadata["queued_reason"] = reason

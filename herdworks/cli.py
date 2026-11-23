@@ -16,7 +16,7 @@ from .pickup import stop, close, tidy
 from .pr import open_pr, recorded_pr
 from .projects import grant_project
 from .limits import config, hold_reason
-from . import memory, automations
+from . import memory, automations, impact
 from .status import tree
 
 
@@ -62,7 +62,8 @@ def task_lines(project):
         unsandboxed = 'unsandboxed' if any(e.get('sandboxed') is False for e in events(path)) or ((project / 'coordinator.json').exists() and json.loads((project / 'coordinator.json').read_text()).get('sandboxed') is False) else ''
         roles = set(data.get("roles", {})) | {f["role"] for f in observed if f["launch_source"] == "override"}
         overrides = "overrides=" + ",".join(sorted(roles)) if roles else ""
-        yield f"{data['id']} {status} {commit} {address} {first_line(path / 'brief.md')} {summary} {overrides} {held} {unsandboxed}".rstrip()
+        line = f"{data['id']} {status} {commit} {address} {first_line(path / 'brief.md')} {summary} {overrides} {held} {unsandboxed}"
+        yield line.rstrip() + impact.label(data.get('impact'))
 
 
 def authorize(project, memory_task=None, memory_command=False):
@@ -85,6 +86,13 @@ def authorize(project, memory_task=None, memory_command=False):
             or labels.get("hw") != f"project:{project}"
             or session.get("cwd") != str(project_path(project) / "coordinator")):
         raise ValueError("caller is not the coordinator of this Project")
+
+
+def add_assessment_arguments(parser):
+    parser.add_argument("--reproduction", choices=impact.REPRODUCTION,
+                        help="whether the reported symptom has been reproduced")
+    parser.add_argument("--confidence", choices=impact.CONFIDENCE,
+                        help="confidence in the assessment")
 
 
 def main(argv=None):
@@ -160,6 +168,9 @@ def main(argv=None):
     command.add_argument("--file", type=Path)
     command.add_argument("--number", type=int, help="redeliver an existing message number")
     command.add_argument("--base", help="start this task from another branch instead of the Project base")
+    command.add_argument("--impact", choices=impact.LEVELS, help="propose task impact; use with --impact-reason")
+    command.add_argument("--impact-reason", help="one line explaining the impact or what's still unknown")
+    add_assessment_arguments(command)
     command = sub.add_parser("read")
     command.add_argument("project")
     command.add_argument("--since", type=int, default=0)
@@ -187,6 +198,14 @@ def main(argv=None):
     command = actions.add_parser("close")
     command.add_argument("project")
     command.add_argument("task_id")
+    for action, help_text in (("impact", "update an impact proposal"),
+                              ("correct-impact", "record an owner's impact correction")):
+        command = actions.add_parser(action, help=help_text)
+        command.add_argument("project")
+        command.add_argument("task_id")
+        command.add_argument("level", choices=impact.LEVELS)
+        command.add_argument("--reason", required=True)
+        add_assessment_arguments(command)
     command = sub.add_parser("spawn")
     command.add_argument("project")
     command.add_argument("task_id")
@@ -287,7 +306,9 @@ def main(argv=None):
             if args.file and args.text is not None:
                 raise ValueError("use text or --file")
             text = args.file.read_text() if args.file else args.text
-            number, repeat = say(project_path(args.project), text, args.number, base=args.base)
+            number, repeat = say(project_path(args.project), text, args.number, base=args.base,
+                                 impact=args.impact, impact_reason=args.impact_reason,
+                                 reproduction=args.reproduction, confidence=args.confidence)
             print(f"delivered {number}" + (" repeat" if repeat else ""))
         elif args.command == "read":
             if args.latest:
@@ -310,6 +331,11 @@ def main(argv=None):
         elif args.command == "task" and args.action == "close":
             removed = close(task_path(args.project, args.task_id))
             print(f"closed {args.task_id}: removed {len(removed)} worktrees")
+        elif args.command == "task" and args.action in ("impact", "correct-impact"):
+            path = task_path(args.project, args.task_id)
+            result = impact.update(path, args.level, args.reason, corrected=args.action == "correct-impact",
+                                   reproduction=args.reproduction, confidence=args.confidence)
+            print(args.task_id + impact.label(result))
         elif args.command == "task":
             path, repeat = new_task(project_path(args.project), args.brief, args.message,
                                     dict(args.role), args.stuck_after, args.base, args.kind)

@@ -42,6 +42,35 @@ a repeat acknowledgement. A blocked coordinator is reported without forced input
 `say hello --base feature/x "..."` records `feature/x` with that message: the task starts
 from the newest remote `feature/x` and its draft pull request opens against that branch.
 
+A Bot can propose impact when it sends a task:
+
+```sh
+hw say hello "Fix the mobile overflow" --impact green --impact-reason "Local CSS fix with limited impact" --reproduction reproduced --confidence high
+hw tasks hello
+hw task impact hello HE-1 yellow --reason "The fix requires a production migration" --confidence medium
+hw task correct-impact hello HE-1 red --reason "The user confirmed an architecture redesign" --confidence high
+```
+
+Green requires a straightforward change with low impact if it goes wrong. This can cover
+small features, UI tweaks and reproduced bugs. Routine but consequential production data
+or database changes and deployments outside existing CI/CD are yellow. Major architectural
+redesigns and decisions requiring Architect or Arena are red. The highest applicable color
+wins. Use `unknown` with a reason when missing facts prevent a classification. Missing
+reproduction alone does not make the task yellow. See `hw help agent` for Bot guidance.
+
+The optional `--impact` and `--impact-reason` flags go together. With them, a Bot can also
+record `--reproduction` (`reproduced`, `unreproduced`, `unknown`, `not-applicable`) and
+`--confidence` (`high`, `medium`, `low`, `unknown`). A known production migration can
+be yellow while the reported symptom is still unreproduced and the assessment has low confidence.
+The proposal is recorded separately from the user's words. `task new --message NUMBER`
+attaches it to the task, and `tasks` and `status` display the assessment and its source.
+Replaying intake preserves the current assessment. The Bot or coordinator can update a
+proposal as facts change. Updates and corrections retain reproduction and confidence when
+their flags are omitted. Pass `unknown` to reset either. Run
+`correct-impact` outside Herdworks sessions as the owner to record or revise a correction.
+A proposal update cannot overwrite an owner correction. Impact records scope and leaves
+the existing verification, deployment and merge authority in effect.
+
 Replies are numbered `.md` files under `coordinator/outbox/`, beginning `REPLY`, `QUESTION`
 or `DONE`. `read --since N` returns only reply numbers greater than N. The coordinator
 keeps task notes in `coordinator/tasks/HE-1/`. A QUESTION leaves the task `waiting on you`;

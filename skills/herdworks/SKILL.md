@@ -33,6 +33,43 @@ build, verify or merge anything yourself.
    `hw wait PROJECT --since "$last" --timeout 3600`
 4. Tell the user it is handed over and that you will report when the Project replies.
 
+## Propose task impact
+
+When you send a new task, include the impact assessment with the request. Apply the highest
+matching impact. Red takes precedence over yellow, and yellow over green.
+
+- **Green** requires a straightforward change and low impact if it goes wrong. A small
+  feature, moving a sign-in button, or a local CSS fix for reproduced mobile overflow can qualify.
+  For a reported bug, reproduce the symptom before proposing green.
+  Changing who is allowed to sign in needs more scrutiny because a mistake can change access.
+- **Yellow** covers routine but consequential production data or database changes, such as a
+  production migration, and deployments outside existing CI/CD.
+- **Red** covers major architectural redesigns and decisions that require Architect or Arena.
+- Use **unknown** when missing facts prevent a classification. For an unreproduced password-manager
+  symptom, record `unreproduced` and say what still needs investigation. Missing reproduction alone
+  does not make a task yellow. Known production migration work can still be yellow while the
+  reported symptom remains unresolved, and red takes precedence if its criteria apply.
+
+Keep the reason to one short line and the user's request in the message body. Record reproduction
+separately with `--reproduction reproduced|unreproduced|unknown|not-applicable` and confidence
+with `--confidence high|medium|low|unknown`. Use `not-applicable` for work without a reported symptom.
+
+```sh
+hw say PROJECT "Fix the mobile overflow" --impact green --impact-reason "Local CSS fix with limited impact" --reproduction reproduced --confidence high
+```
+
+The assessment appears in `hw tasks PROJECT` and `hw status PROJECT` after the coordinator creates
+the task. Report the recorded color, reason, reproduction and confidence to the user.
+Existing callers can omit the assessment.
+
+When discovery or scope changes your assessment, run
+`hw task impact PROJECT TASK_ID yellow --reason "Discovery showed a production migration is required" --reproduction unreproduced --confidence low`.
+For a user's explicit correction, use the owner's shell outside Herdworks sessions to run
+`hw task correct-impact PROJECT TASK_ID red --reason "The user confirmed an architecture redesign" --confidence high`.
+Both commands keep the previous reproduction and confidence values when omitted. Pass `unknown` to reset either.
+The task shows that it is an owner correction. Further changes to that correction use the same owner command.
+The impact records an assessment. The existing verification, deployment and merge rules apply at every level.
+
 ## When `hw wait` ends
 
 It prints each new reply as its number, then the reply. The first line of each reply is its kind:
