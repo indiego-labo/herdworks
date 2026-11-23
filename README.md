@@ -68,7 +68,7 @@ you ──hw say──► coordinator ──► builder      writes the change i
   mark its own work as done.
 - **Pull request.** With Project grants, Herdworks opens a ready-for-review PR with inline visual evidence when available. You decide when to merge.
   When a check needs something the machine does not have (a phone simulator, a paid
-  account), the pull request says so, marked for manual verification.
+  account), the title says `[Needs manual verification]` and the body lists the blocked checks.
 
 Agents run in [herdr core](https://github.com/herdrdev/herdr-core) terminals, so they keep
 working when you close the window. Watch one live with `hc attach NAME` (`hw status`

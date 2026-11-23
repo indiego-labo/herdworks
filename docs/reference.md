@@ -49,8 +49,9 @@ After the independent verifier and evidence reviewer pass the gate, the coordina
 `hw project grant PROJECT --push --pull-request`. Existing Projects keep their grants, and
 `--draft-pr` remains an alias for the pull-request grant. Both verified and manual-verification
 pull requests open ready for review. The `--manual-verification` route requires independent
-review of the available proof and lists the environment-blocked checks in the PR. The owner
-decides whether to merge.
+review of the available proof. It marks the PR title with `[Needs manual verification]` and
+lists the environment-blocked checks in the body. It works with the repository's existing
+GitHub labels. The owner decides whether to merge.
 
 For visible changes, the verifier saves screenshots, a short video or an animated GIF in its
 evidence folder. The evidence reviewer selects inspected files and records their captions,

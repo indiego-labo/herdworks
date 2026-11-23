@@ -158,8 +158,7 @@ def open_pr(path, manual_verification=False, title=None):
                                  "--base", base_branch, "--head", data["branch"],
                                  "--title", title,
                                  "--body-file", str(body),
-                                 *attachments,
-                                 *(["--label", "needs-manual-verification"] if manual_verification else [])],
+                                 *attachments],
                                 cwd=config["repo"], capture_output=True, text=True)
         url = result.stdout.strip()
         if not re.fullmatch(r"https://[^\s]+/pull/[0-9]+", url):

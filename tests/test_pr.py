@@ -326,7 +326,7 @@ class PRTests(GateCase):
         if first == 'INCONCLUSIVE':
             write_claims(self.verify, 'PROVED', 'NOT_PROVED')
 
-    def test_manual_verification_pr_title_body_label_status_and_no_merge(self):
+    def test_manual_verification_pr_does_not_require_a_repository_label(self):
         self.environment_verdict()
         self.assertFalse(check_gate(self.path)[0])
         output = io.StringIO()
@@ -338,7 +338,7 @@ class PRTests(GateCase):
         self.assertEqual(args[:2], ['pr', 'create'])
         self.assertFalse(calls[0]['isDraft'])
         self.assertEqual(args[args.index('--title') + 1], '[Needs manual verification] Add a concise shout flag')
-        self.assertEqual(args[args.index('--label') + 1], 'needs-manual-verification')
+        self.assertNotIn('--label', args)
         body = calls[0]['body']
         for value in ('## Needs manual verification', 'Verify on the target device', 'no device or emulator',
                       'Agents must not merge this pull request.', 'INCONCLUSIVE', self.sha):
