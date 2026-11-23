@@ -148,7 +148,9 @@ def main(argv=None):
     command = actions.add_parser("grant")
     command.add_argument("project")
     command.add_argument("--push", action=argparse.BooleanOptionalAction, default=None)
-    command.add_argument("--draft-pr", action=argparse.BooleanOptionalAction, default=None)
+    command.add_argument("--pull-request", "--draft-pr", dest="draft_pr",
+                         action=argparse.BooleanOptionalAction, default=None,
+                         help="allow ready-for-review pull requests (--draft-pr is a legacy alias)")
     command.add_argument("--unsandboxed", action=argparse.BooleanOptionalAction, default=None)
     command.add_argument("--remote")
     command.add_argument("--gh", help="gh executable (default: gh from PATH)")

@@ -49,7 +49,7 @@ Journeys:
   exactly one task, ending verified. No new inbox entry is allocated for a redelivery.
 - draft-pr: use a local bare remote and planted/fake-gh.sh, grant push and draft-pr, send
   shout.md through the real coordinator. Require the remote branch at the verified SHA, one
-  pr create --draft with all four body sections and verifier commands/output, DONE with its
+  ready-for-review pr create with the four core body sections and verifier commands/output, DONE with its
   address, and tasks for review. Inspect fake-gh.jsonl, pr-body.md, remote.json and timing.json.
 - no-grant: same local remote and stand-in, with both grants off. Require no remote refs, no
   fake-gh call, verified status, and DONE naming both missing grants and the verified commit.

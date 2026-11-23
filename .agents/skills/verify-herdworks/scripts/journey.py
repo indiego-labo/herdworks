@@ -297,7 +297,7 @@ def run_journey(kind, evidence, timeout, project_name='hello', remote=False):
                     assert url in done
                     assert git(remote, 'rev-parse', 'refs/heads/hw/HE-1') == commit
                     calls = [json.loads(line) for line in (evidence / 'fake-gh.jsonl').read_text().splitlines()]
-                    assert len(calls) == 1 and calls[0]['args'][:3] == ['pr', 'create', '--draft']
+                    assert len(calls) == 1 and calls[0]['args'][:2] == ['pr', 'create'] and not calls[0]['isDraft']
                     body = calls[0]['body']
                     headings = ['## Why', '## Scope', '## Blast Radius', '## Verification']
                     positions = [body.index(heading + '\n') for heading in headings]

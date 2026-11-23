@@ -1,8 +1,8 @@
 # Herdworks
 
 Give a coding task to a Project the way you would message a teammate. Herdworks plans it,
-has one agent build it, has a different agent check it really works, and hands you a draft
-pull request with the proof attached. You review and merge.
+has one agent build it, has a different agent check it really works, and hands you a
+ready-for-review pull request with the proof attached. You review and merge.
 
 It runs on your own computer or server, with open-source agents, and needs no cloud account
 beyond GitHub.
@@ -47,7 +47,7 @@ hw say myapp --base release/2 "Backport the sign-up fix. Done when the tests pas
 ```
 
 Tasks start from the newest version of their base branch on GitHub, and a `--base` task's
-draft pull request opens against that branch.
+pull request opens against that branch.
 
 ## How it works
 
@@ -56,7 +56,7 @@ you ──hw say──► coordinator ──► builder      writes the change i
                 (one per        ──► verifier     a different agent; runs it, saves proof
                  Project)       ──► evidence reviewer   checks the proof is real
                                 ──► gate         a script: verified, or not
-                                └──► draft pull request on GitHub ──► you merge
+                                └──► ready-for-review pull request on GitHub ──► you merge
 ```
 
 - **Project.** One per repository, with its own coordinator, task list and memory.
@@ -66,7 +66,7 @@ you ──hw say──► coordinator ──► builder      writes the change i
   is never the one that wrote it.
 - **Gate.** A plain script that decides whether a task counts as verified. No agent can
   mark its own work as done.
-- **Draft pull request.** Every task ends as a draft for you to review. Agents never merge.
+- **Pull request.** With Project grants, Herdworks opens a ready-for-review PR with inline visual evidence when available. You decide when to merge.
   When a check needs something the machine does not have (a phone simulator, a paid
   account), the pull request says so, marked for manual verification.
 

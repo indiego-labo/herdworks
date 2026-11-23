@@ -30,8 +30,14 @@ or ambiguous-evidence. For the last two include Ask: with the smallest action ne
 Also save ../evidence/commands.json as a JSON array, one record per command you ran:
 [{"command": "python3 hello.py Ada", "output": "Hello, Ada!\n"}]
 Use the actual command and its stdout/stderr, including the outcome for commands with no output.
-Redact secret values. This dedicated record supplies the short pull request briefing; all other
-artifacts stay in the Project and are not copied into the pull request body.
+Redact secret values. This record supplies the short pull request briefing.
+
+For visible changes, save relevant screenshots of the running verified commit. For an interaction,
+save a short recording or animated GIF that shows the behavior. Save media directly in
+../evidence/ with short filenames using letters, numbers, dots, underscores or hyphens. In the
+verdict tell the reviewer what each file shows, which files are stand-ins and what visual proof
+was unavailable. Prepare media safe for everyone who can read the target repository. Keep raw
+captures that contain credentials, private data or unrelated material out of the publishable set.
 
 When the environment prevents a required check, do not retry it. Write INCONCLUSIVE with
 `BLOCKED-BY-ENVIRONMENT: REQUIREMENT; missing PREREQUISITE` for each such check. Prove every

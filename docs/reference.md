@@ -23,7 +23,7 @@ account may push to, with no allowlist and no hand-cloning. It asks GitHub for t
 branch, checks the account may push, then clones over HTTPS with `gh`'s sign-in into
 `HW_HOME/repos/owner/repo`. A repository it cannot push to is refused before anything is
 cloned, and a failed add leaves no Project behind. The add turns on the usual grants: push,
-draft pull requests and unsandboxed sessions. `--base BRANCH` picks another base branch.
+ready-for-review pull requests and unsandboxed sessions. `--base BRANCH` picks another base branch.
 `--repo PATH` adds a checkout you already have and clones nothing.
 
 Every new task fetches the Project's remote first and starts from the newest remote copy of
@@ -40,7 +40,31 @@ recorded unchanged with rising numbers before delivery; `say hello --number 1` r
 that exact message after a delivery error. Repeated numbers reuse their task and receive
 a repeat acknowledgement. A blocked coordinator is reported without forced input.
 `say hello --base feature/x "..."` records `feature/x` with that message: the task starts
-from the newest remote `feature/x` and its draft pull request opens against that branch.
+from the newest remote `feature/x` and its pull request opens against that branch.
+
+### Pull requests and evidence
+
+After the independent verifier and evidence reviewer pass the gate, the coordinator runs
+`hw pr PROJECT TASK_ID`. Owners can enable publishing with
+`hw project grant PROJECT --push --pull-request`. Existing Projects keep their grants, and
+`--draft-pr` remains an alias for the pull-request grant. Both verified and manual-verification
+pull requests open ready for review. The `--manual-verification` route requires independent
+review of the available proof and lists the environment-blocked checks in the PR. The owner
+decides whether to merge.
+
+For visible changes, the verifier saves screenshots, a short video or an animated GIF in its
+evidence folder. The evidence reviewer selects inspected files and records their captions,
+SHA-256 hashes and any missing visual proof in `visuals.json` next to `review.md`. The PR
+shows selected media inline and labels stand-ins. Commands, check results and limitations
+remain in the body, including for tasks where visuals do not apply.
+
+On GitHub.com and GitHub Enterprise Cloud, `gh` with `pr create --attach` support (v2.99.0
+or newer) uploads screenshots and playable videos directly to the repository's PR. On older
+clients or other hosts, Herdworks stores images and animated GIFs in the same repository under
+`hw-evidence/*` tags and embeds links pinned to their media commit. Keep these tags to preserve
+the images after the task branch is deleted. Use a GIF for interaction proof on this route.
+Supported media are PNG, JPEG, GIF, WebP, MP4, MOV and WebM, up to 10 MB per file. Media shares
+the target repository's access scope. [GitHub attachment access](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/attaching-files)
 
 Replies are numbered `.md` files under `coordinator/outbox/`, beginning `REPLY`, `QUESTION`
 or `DONE`. `read --since N` returns only reply numbers greater than N. The coordinator

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -6,9 +7,28 @@ import sys
 repo = Path.cwd()
 log = repo.parent / 'fake-gh.jsonl'
 args = sys.argv[1:]
+if args == ['pr', 'create', '--help']:
+    if (repo.parent / 'fake-gh-attachments').is_file():
+        print('  --attach file')
+    raise SystemExit(0)
+
 record = dict(args=args)
-if args[:2] == ['pr', 'create'] and '--draft' in args:
-    record['body'] = Path(args[args.index('--body-file') + 1]).read_text()
+if args[:2] == ['pr', 'create']:
+    record['isDraft'] = '--draft' in args
+    body_path = Path(args[args.index('--body-file') + 1])
+    body = body_path.read_text()
+    assets = [Path(args[index + 1]) for index, arg in enumerate(args) if arg == '--attach']
+    if assets:
+        record['assets'] = {}
+        for file in assets:
+            assert body_path.parent / file.name == file
+            destination = f'https://github.invalid/user-attachments/assets/{file.name}'
+            if file.suffix in ('.mp4', '.mov', '.webm'):
+                body = body.replace(f'![]({file.name})', destination)
+            else:
+                body = body.replace(f']({file.name})', f']({destination})')
+            record['assets'][file.name] = hashlib.sha256(file.read_bytes()).hexdigest()
+    record['body'] = body
     output = 'https://github.invalid/fixture/hello/pull/1'
 elif args[:2] == ['issue', 'list']:
     source = repo.parent / 'fake-gh-issues.json'
