@@ -9,7 +9,7 @@ one agent builds it, a different agent checks it works, and you get a draft pull
     hw read PROJECT                                  the coordinator's replies
     hw wait PROJECT                                  wait for the next reply, then print it
     hw tasks PROJECT                                 every task and its status
-    hw task correct-impact PROJECT TASK LEVEL --reason "..."   correct a task's impact
+    hw task correct-impact PROJECT TASK LEVEL --reason "..."   correct impact, reproduction or confidence
     hw status                                        what is running now
     hc attach NAME                                   watch an agent live (names from hw status)
 

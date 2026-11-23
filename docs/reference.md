@@ -45,22 +45,28 @@ from the newest remote `feature/x` and its draft pull request opens against that
 A Bot can propose impact when it sends a task:
 
 ```sh
-hw say hello "Fix the mobile overflow" --impact green --impact-reason "Reproduced with a straightforward CSS fix"
+hw say hello "Fix the mobile overflow" --impact green --impact-reason "Local CSS fix with limited impact" --reproduction reproduced --confidence high
 hw tasks hello
-hw task impact hello HE-1 yellow --reason "The fix requires a data migration"
-hw task correct-impact hello HE-1 red --reason "The user confirmed an architecture redesign"
+hw task impact hello HE-1 yellow --reason "The fix requires a production migration" --confidence medium
+hw task correct-impact hello HE-1 red --reason "The user confirmed an architecture redesign" --confidence high
 ```
 
-Use green for straightforward features, UI tweaks, and reproduced bugs with straightforward fixes.
-Data or database changes and deployment beyond existing CI/CD are yellow. Major architectural
-changes, redesigns and work requiring Architect or Arena are red. The highest applicable color
-wins. Use `unknown` with a reason when missing facts prevent a classification, such as an
-unreproduced symptom with no confirmed scope. See `hw help agent` for Bot guidance.
+Green requires a straightforward change with low impact if it goes wrong. This can cover
+small features, UI tweaks and reproduced bugs. Routine but consequential production data
+or database changes and deployments outside existing CI/CD are yellow. Major architectural
+redesigns and decisions requiring Architect or Arena are red. The highest applicable color
+wins. Use `unknown` with a reason when missing facts prevent a classification. Missing
+reproduction alone does not make the task yellow. See `hw help agent` for Bot guidance.
 
-The two `say` flags are optional and go together. They record the proposal separately from
-the user's words. `task new --message NUMBER` attaches it to the associated task, and
-`tasks` and `status` display its level, reason and source. Replaying intake preserves the
-current assessment. The Bot or coordinator can update a proposal as facts change. Run
+The optional `--impact` and `--impact-reason` flags go together. With them, a Bot can also
+record `--reproduction` (`reproduced`, `unreproduced`, `unknown`, `not-applicable`) and
+`--confidence` (`high`, `medium`, `low`, `unknown`). A known production migration can
+be yellow while the reported symptom is still unreproduced and the assessment has low confidence.
+The proposal is recorded separately from the user's words. `task new --message NUMBER`
+attaches it to the task, and `tasks` and `status` display the assessment and its source.
+Replaying intake preserves the current assessment. The Bot or coordinator can update a
+proposal as facts change. Updates and corrections retain reproduction and confidence when
+their flags are omitted. Pass `unknown` to reset either. Run
 `correct-impact` outside Herdworks sessions as the owner to record or revise a correction.
 A proposal update cannot overwrite an owner correction. Impact records scope and leaves
 the existing verification, deployment and merge authority in effect.

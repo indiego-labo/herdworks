@@ -24,8 +24,7 @@ build, verify or merge anything yourself.
    `last=$(hw read PROJECT --latest)`
 2. Send the user's request with their own words. Add a done check only if the user gave one or
    agrees to yours; never add requirements they did not ask for:
-   Propose a task impact and a short reason alongside the request:
-   `hw say PROJECT "THE USER'S REQUEST. Done when ..." --impact green --impact-reason "Reproduced mobile overflow with a local CSS fix"`
+   Propose task impact alongside the request using the guidance below.
    If they want it based on another branch, add `--base BRANCH`; the draft pull request opens
    against that branch. Several unrelated tasks can go in separate messages. Each gets an id
    such as `MY-1`.
@@ -38,20 +37,35 @@ build, verify or merge anything yourself.
 
 Apply the highest matching impact. Red takes precedence over yellow, and yellow over green.
 
-- **Green** covers straightforward features and UI tweaks, and reproduced bugs with a straightforward fix.
-- **Yellow** covers changes to data or a database, including migrations, and deployment beyond existing CI/CD.
-- **Red** covers major architectural changes, redesigns, and work that requires Architect or Arena.
-- Use **unknown** when missing facts prevent a classification. For an unreproduced password-manager symptom,
-  say what needs investigation in the reason. A known migration still warrants yellow, or red if red criteria apply.
+- **Green** requires a straightforward change and low impact if it goes wrong. A small
+  feature, moving a sign-in button, or a local CSS fix for reproduced mobile overflow can qualify.
+  For a reported bug, reproduce the symptom before proposing green.
+  Changing who is allowed to sign in needs more scrutiny because a mistake can change access.
+- **Yellow** covers routine but consequential production data or database changes, such as a
+  production migration, and deployments outside existing CI/CD.
+- **Red** covers major architectural redesigns and decisions that require Architect or Arena.
+- Use **unknown** when missing facts prevent a classification. For an unreproduced password-manager
+  symptom, record `unreproduced` and say what still needs investigation. Missing reproduction alone
+  does not make a task yellow. Known production migration work can still be yellow while the
+  reported symptom remains unresolved, and red takes precedence if its criteria apply.
 
-Keep the reason to one short line and keep the user's request in the message body. The
-proposal appears in `hw tasks PROJECT` and `hw status PROJECT` after the coordinator creates the task.
-Report the recorded impact and reason to the user. Both intake flags are optional for existing callers.
+Keep the reason to one short line and the user's request in the message body. Record reproduction
+separately with `--reproduction reproduced|unreproduced|unknown|not-applicable` and confidence
+with `--confidence high|medium|low|unknown`. Use `not-applicable` for work without a reported symptom.
+
+```sh
+hw say PROJECT "Fix the mobile overflow" --impact green --impact-reason "Local CSS fix with limited impact" --reproduction reproduced --confidence high
+```
+
+The assessment appears in `hw tasks PROJECT` and `hw status PROJECT` after the coordinator creates
+the task. Report the recorded color, reason, reproduction and confidence to the user.
+Existing callers can omit the assessment.
 
 When discovery or scope changes your assessment, run
-`hw task impact PROJECT TASK_ID yellow --reason "Discovery showed a database migration is required"`.
+`hw task impact PROJECT TASK_ID yellow --reason "Discovery showed a production migration is required" --reproduction unreproduced --confidence low`.
 For a user's explicit correction, use the owner's shell outside Herdworks sessions to run
-`hw task correct-impact PROJECT TASK_ID red --reason "The user confirmed an architecture redesign"`.
+`hw task correct-impact PROJECT TASK_ID red --reason "The user confirmed an architecture redesign" --confidence high`.
+Both commands keep the previous reproduction and confidence values when omitted. Pass `unknown` to reset either.
 The task shows that it is an owner correction. Further changes to that correction use the same owner command.
 The impact records an assessment. The existing verification, deployment and merge rules apply at every level.
 

@@ -81,9 +81,9 @@ def inbox(project):
 
 
 def say(project, text=None, number=None, root=ROOT, delivery_key=None, base=None,
-        *, impact=None, impact_reason=None):
+        *, impact=None, impact_reason=None, reproduction=None, confidence=None):
     data = read_project(project)
-    proposed = proposal(impact, impact_reason)
+    proposed = proposal(impact, impact_reason, reproduction=reproduction, confidence=confidence)
     if text is not None and not text.strip():
         raise ValueError("message must not be empty")
     if base is not None:

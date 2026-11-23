@@ -39,7 +39,8 @@ Each message becomes a task with an id like `MY-1`. You can send more while it w
 If a task needs a decision from you, `hw read` shows the question; answer with `hw say`.
 
 Your Bot can propose a green, yellow or red impact with a short reason when it sends a task.
-`hw tasks` shows the proposal, and you can correct it with `hw task correct-impact`.
+It can report reproduction and confidence separately. `hw tasks` shows the assessment,
+and you can correct it with `hw task correct-impact`.
 See `hw help agent` for the criteria and commands.
 
 Any repository your GitHub sign-in can push to can become a Project; Herdworks clones it
