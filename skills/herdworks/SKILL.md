@@ -1,12 +1,12 @@
 ---
 name: herdworks
-description: Hand coding tasks to a Herdworks Project and follow them to a draft pull request. Use when the user asks to give a task to a Project or "send it to Herdworks", asks how a Herdworks task is going, or answers a question from a Project's coordinator. Relies on the `hw` command.
+description: Hand coding tasks to a Herdworks Project and follow them to a ready-for-review pull request. Use when the user asks to give a task to a Project or "send it to Herdworks", asks how a Herdworks task is going, or answers a question from a Project's coordinator. Relies on the `hw` command.
 ---
 
 # Herdworks as your Bot
 
 Herdworks runs a coordinator per Project (one GitHub repository). It turns a message into a
-task, has one agent build it and others verify it, and ends with a draft pull request. You are
+task, has one agent build it and others verify it, and ends with a ready-for-review pull request. You are
 the go-between: pass the user's words in, watch for replies, and report back. You do not
 build, verify or merge anything yourself.
 
@@ -25,7 +25,7 @@ build, verify or merge anything yourself.
 2. Send the user's request with their own words. Add a done check only if the user gave one or
    agrees to yours; never add requirements they did not ask for:
    `hw say PROJECT "THE USER'S REQUEST. Done when ..."`
-   If they want it based on another branch, add `--base BRANCH`; the draft pull request opens
+   If they want it based on another branch, add `--base BRANCH`; the pull request opens
    against that branch. Several unrelated tasks can go in separate messages. Each gets an id
    such as `MY-1`.
 3. Start waiting in the background (in Claude Code, run it as a background command so you are

@@ -218,7 +218,7 @@ def check_project(fix):
         todo(str(error))
         return None
     done(f'Project {name}: tasks branch from {read_project(project)["base_branch"]} '
-         f'and end as draft pull requests on {slug}')
+         f'and end as ready-for-review pull requests on {slug}')
     return name
 
 
@@ -261,5 +261,5 @@ def setup(check_only=False):
     say(f'  Give it a task:        hw say {project} "Fix the typo in the README. Done when it reads correctly."')
     say(f'  Read its replies:      hw read {project}')
     say(f'  See its tasks:         hw tasks {project}')
-    say('  Each task ends as a draft pull request for you to review and merge.')
+    say('  Each task ends as a ready-for-review pull request for you to review and merge.')
     return 0

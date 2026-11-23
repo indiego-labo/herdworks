@@ -1,7 +1,7 @@
 # Herdworks (hw)
 
 Give a coding task to a Project the way you would message a teammate. A coordinator plans it,
-one agent builds it, a different agent checks it works, and you get a draft pull request.
+one agent builds it, a different agent checks it works, and you get a ready-for-review pull request. Reviewed screenshots and motion evidence appear in the PR body when available.
 
 ## Everyday commands
 
@@ -21,6 +21,7 @@ with hw say), DONE (finished, with the pull request) or PROBLEM (needs the owner
     hw setup --check          only report what is missing
     hw project add NAME --github owner/repo       add a Project from GitHub; hw clones it
     hw project add NAME --repo PATH --base main   add a checkout you already have
+    hw project grant NAME --push --pull-request   allow ready-for-review pull requests
     hw say NAME --base BRANCH "what you want"     start that task from another branch
     hw rules                  the house rules workers follow
     hw skills                 skills workers can load, and rules naming a missing one

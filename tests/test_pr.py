@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import os
@@ -33,6 +34,80 @@ class PRTests(GateCase):
         self.assertFalse(self.log.exists())
         self.assertEqual(git(self.remote, 'for-each-ref', '--format=%(refname)'), '')
 
+    def select_visuals(self, *entries, unavailable=()):
+        media = []
+        for name, content, caption, source in entries:
+            (self.commands.parent / name).write_bytes(content)
+            media.append(dict(file=name, caption=caption, source=source,
+                              sha256=hashlib.sha256(content).hexdigest()))
+        (self.review / 'visuals.json').write_text(json.dumps(dict(media=media, unavailable=list(unavailable))))
+        (self.review / 'review.md').touch()
+
+    def test_existing_grant_publishes_inline_images_and_motion_on_older_gh(self):
+        self.select_visuals(('result.png', b'screenshot bytes', 'After submitting', 'live'),
+                            ('flow.gif', b'preview bytes', 'Fixture interaction', 'stand-in'),
+                            ('flow.mp4', b'video bytes', 'Original recording', 'live'))
+        with patch('herdworks.pr.repository_identity', return_value='github.com/fixture/hello'):
+            open_pr(self.path)
+        call = json.loads(self.log.read_text())
+        self.assertFalse(call['isDraft'])
+        self.assertNotIn('--attach', call['args'])
+        ref = git(self.remote, 'for-each-ref', '--format=%(refname)', 'refs/tags/hw-evidence')
+        media_commit = git(self.remote, 'rev-parse', ref)
+        self.assertIn(f'![After submitting](../blob/{media_commit}/visual-1.png?raw=true)', call['body'])
+        self.assertIn(f'![Stand-in: Fixture interaction](../blob/{media_commit}/visual-2.gif?raw=true)', call['body'])
+        self.assertIn('Original recording stayed in Project evidence', call['body'])
+        self.assertEqual(git(self.remote, 'ls-tree', '--name-only', media_commit), 'visual-1.png\nvisual-2.gif')
+        self.assertEqual(git(self.remote, 'show', f'{media_commit}:visual-1.png'), 'screenshot bytes')
+        self.assertEqual(git(self.remote, 'show', f'{media_commit}:visual-2.gif'), 'preview bytes')
+        self.assertEqual(git(self.remote, 'rev-parse', 'refs/heads/hw/HE-1'), self.sha)
+
+    def test_native_attachments_render_video_and_screenshot_with_captions(self):
+        (self.root / 'fake-gh-attachments').touch()
+        self.select_visuals(('result.png', b'screenshot bytes', 'After submitting', 'live'),
+                            ('flow.mp4', b'video bytes', 'Fixture interaction', 'stand-in'))
+        with patch('herdworks.pr.repository_identity', return_value='github.com/fixture/hello'):
+            open_pr(self.path)
+        call = json.loads(self.log.read_text())
+        self.assertFalse(call['isDraft'])
+        self.assertIn('![After submitting](https://github.invalid/user-attachments/assets/visual-1.png)', call['body'])
+        self.assertIn('Stand-in: Fixture interaction\n\nhttps://github.invalid/user-attachments/assets/visual-2.mp4',
+                      call['body'])
+        self.assertEqual(call['assets']['visual-2.mp4'], hashlib.sha256(b'video bytes').hexdigest())
+        self.assertEqual(git(self.remote, 'for-each-ref', 'refs/tags/hw-evidence'), '')
+
+    def test_manual_pr_discloses_missing_and_changed_visuals(self):
+        self.environment_verdict()
+        self.select_visuals(('result.png', b'approved bytes', 'After submitting', 'live'),
+                            unavailable=['Target device video was unavailable.'])
+        (self.commands.parent / 'result.png').write_bytes(b'modified bytes')
+        open_pr(self.path, manual_verification=True)
+        call = json.loads(self.log.read_text())
+        self.assertFalse(call['isDraft'])
+        self.assertIn('Target device video was unavailable.', call['body'])
+        self.assertIn('changed after evidence review', call['body'])
+        self.assertIn('## Needs manual verification', call['body'])
+        self.assertNotIn('![', call['body'])
+        self.assertEqual(git(self.remote, 'for-each-ref', 'refs/tags/hw-evidence'), '')
+
+    def test_visual_symlink_is_not_published(self):
+        self.select_visuals(('result.png', b'approved bytes', 'After submitting', 'live'))
+        outside = self.root / 'outside.png'
+        (self.commands.parent / 'result.png').rename(outside)
+        (self.commands.parent / 'result.png').symlink_to(outside)
+        open_pr(self.path)
+        self.assertIn('could not be read', json.loads(self.log.read_text())['body'])
+        self.assertEqual(git(self.remote, 'for-each-ref', 'refs/tags/hw-evidence'), '')
+
+    def test_visual_manifest_from_after_review_prevents_publication(self):
+        self.select_visuals(('result.png', b'approved bytes', 'After submitting', 'live'))
+        manifest = self.review / 'visuals.json'
+        later = manifest.stat().st_mtime + 1
+        os.utime(manifest, (later, later))
+        with self.assertRaisesRegex(ValueError, 'before review.md'):
+            open_pr(self.path)
+        self.assert_no_external_effect()
+
     def test_new_project_grants_are_off_and_remote_is_named(self):
         from herdworks.projects import add_project
         project = add_project('other', self.repo)
@@ -63,7 +138,7 @@ class PRTests(GateCase):
             open_pr(self.path)
         self.assert_no_external_effect()
 
-    def test_real_push_draft_body_and_second_pr_refusal(self):
+    def test_real_push_pr_body_and_second_pr_refusal(self):
         with patch('herdworks.pr.git', wraps=git) as observed:
             url = open_pr(self.path)
         pushes = [c.args for c in observed.call_args_list if c.args[1] == 'push']
@@ -72,7 +147,8 @@ class PRTests(GateCase):
         self.assertEqual(git(self.remote, 'rev-parse', 'refs/heads/hw/HE-1'), self.sha)
         calls = [json.loads(line) for line in self.log.read_text().splitlines()]
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]['args'][:3], ['pr', 'create', '--draft'])
+        self.assertEqual(calls[0]['args'][:2], ['pr', 'create'])
+        self.assertFalse(calls[0]['isDraft'])
         self.assertEqual(calls[0]['args'][calls[0]['args'].index('--repo') + 1], str(self.remote))
         body = calls[0]['body']
         self.assertEqual([line for line in body.splitlines() if line.startswith('## ')],
@@ -188,7 +264,7 @@ class PRTests(GateCase):
             open_pr(self.path)
         self.assertFalse(self.log.exists())
 
-    def test_moving_head_after_push_refuses_draft(self):
+    def test_moving_head_after_push_refuses_pr(self):
         original = git
         def move(repo, *args, **kwargs):
             result = original(repo, *args, **kwargs)
@@ -235,7 +311,7 @@ class PRTests(GateCase):
             self.assertEqual(main(['project', 'grant', 'unit', '--no-push']), 0)
         self.assertFalse(read_project(self.project)['grants']['push'])
         with redirect_stdout(output):
-            self.assertEqual(main(['project', 'grant', 'unit', '--push', '--draft-pr']), 0)
+            self.assertEqual(main(['project', 'grant', 'unit', '--push', '--pull-request']), 0)
             self.assertEqual(main(['pr', 'unit', 'HE-1']), 0)
         self.assertIn('https://github.invalid/fixture/hello/pull/1', output.getvalue())
 
@@ -250,7 +326,7 @@ class PRTests(GateCase):
         if first == 'INCONCLUSIVE':
             write_claims(self.verify, 'PROVED', 'NOT_PROVED')
 
-    def test_manual_verification_draft_title_body_label_status_and_no_merge(self):
+    def test_manual_verification_pr_does_not_require_a_repository_label(self):
         self.environment_verdict()
         self.assertFalse(check_gate(self.path)[0])
         output = io.StringIO()
@@ -259,9 +335,10 @@ class PRTests(GateCase):
         calls = [json.loads(line) for line in self.log.read_text().splitlines()]
         self.assertEqual(len(calls), 1)
         args = calls[0]['args']
-        self.assertEqual(args[:3], ['pr', 'create', '--draft'])
+        self.assertEqual(args[:2], ['pr', 'create'])
+        self.assertFalse(calls[0]['isDraft'])
         self.assertEqual(args[args.index('--title') + 1], '[Needs manual verification] Add a concise shout flag')
-        self.assertEqual(args[args.index('--label') + 1], 'needs-manual-verification')
+        self.assertNotIn('--label', args)
         body = calls[0]['body']
         for value in ('## Needs manual verification', 'Verify on the target device', 'no device or emulator',
                       'Agents must not merge this pull request.', 'INCONCLUSIVE', self.sha):
@@ -361,7 +438,7 @@ class PRTests(GateCase):
         args = json.loads(self.log.read_text())['args']
         self.assertEqual(args[args.index('--title') + 1], sentence[:72].rstrip())
 
-    def test_draft_opens_against_the_tasks_base_branch(self):
+    def test_pr_opens_against_the_tasks_base_branch(self):
         data = json.loads((self.path / 'task.json').read_text())
         data['base_branch'] = 'feature/x'
         (self.path / 'task.json').write_text(json.dumps(data))

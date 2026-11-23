@@ -1,9 +1,12 @@
 import json
+from pathlib import Path
 import re
 import subprocess
+from tempfile import TemporaryDirectory
 import time
 from urllib.parse import urlsplit
 from .gate import check_gate, blocked_requirements, read_claims
+from .pr_media import reviewed_media, visual_section
 from .projects import read_project
 from .runs import append_event, events, first_line, git, is_stopped, locked, newest_artifact, read_task
 
@@ -48,7 +51,7 @@ def repository_identity(address):
     return "/".join((parsed.hostname, *parts))
 
 
-def build_body(path, commit, manual_verification=False):
+def build_body(path, commit, manual_verification=False, visuals=""):
     data = read_task(path)
     base_branch = data.get('base_branch') or read_project(path.parents[1])['base_branch']
     verdict = newest_artifact(path, "verify-*/verdict.md")
@@ -80,7 +83,8 @@ def build_body(path, commit, manual_verification=False):
     return redact(f"## Why\n\n{why}\n\n"
                   f"## Scope\n\nTask {data['id']}, branch {data['branch']}, based on {base_branch} "
                   f"at {data['base']}. "
-                  f"Covers the original request and its {scope}. Follow-up work is outside this draft.\n\n"
+                  f"Covers the original request and its {scope}.\n\n"
+                  f"{visuals}"
                   f"## Blast Radius\n\nChanged files:\n\n{fenced(changed)}\n\n"
                   f"{summary}\n\n"
                   "## Verification\n\n" + "\n\n".join(proof) + "\n\n" + handoff +
@@ -89,7 +93,7 @@ def build_body(path, commit, manual_verification=False):
 
 def open_pr(path, manual_verification=False, title=None):
     project = path.parents[1]
-    with locked(project), locked(path):
+    with locked(project), locked(path), TemporaryDirectory(prefix="hw-pr-") as staging:
         config = read_project(project)
         data = read_task(path)
         if (data["project"] != config["name"] or data["id"] != path.name
@@ -123,24 +127,46 @@ def open_pr(path, manual_verification=False, title=None):
             title = '[Needs manual verification] ' + title
         base_branch = data.get('base_branch') or config['base_branch']
         body = path / "pr-body.md"
-        body.write_text(build_body(path, commit, manual_verification))
-        git(config["repo"], "push", remote, f"{commit}:refs/heads/{data['branch']}")
+        gh = config.get("gh", "gh")
+        assets, unavailable = reviewed_media(newest_artifact(path, "verify-*/verdict.md"),
+                                             newest_artifact(path, "evidence-*/review.md"), Path(staging))
+        host = repository.split("/")[0]
+        native = False
+        if assets and (host == "github.com" or host.endswith(".ghe.com")):
+            help_result = subprocess.run([gh, "pr", "create", "--help"], cwd=config["repo"],
+                                         capture_output=True, text=True)
+            native = help_result.returncode == 0 and "--attach" in help_result.stdout
+        visuals, attachments, evidence_ref = visual_section(config["repo"], assets, unavailable, native)
+        body.write_text(build_body(path, commit, manual_verification, visuals))
+        if attachments:
+            request_body = Path(staging) / body.name
+            request_body.write_bytes(body.read_bytes())
+            body = request_body
+        if check_gate(path, manual_verification=manual_verification)[:2] != (True, commit):
+            raise ValueError("gate changed during pull request preparation")
+        branch_ref = f"{commit}:refs/heads/{data['branch']}"
+        if evidence_ref:
+            git(config["repo"], "push", "--atomic", remote, branch_ref, evidence_ref)
+        else:
+            git(config["repo"], "push", remote, branch_ref)
         if check_gate(path, manual_verification=manual_verification)[:2] != (True, commit):
             raise ValueError("gate changed after push; pull request not opened")
         append_event(path, dict(event="pr-started", at=time.time(), commit=commit,
                                 branch=data["branch"], remote=remote, manual_verification=manual_verification))
-        result = subprocess.run([config.get("gh", "gh"), "pr", "create", "--draft",
+        result = subprocess.run([gh, "pr", "create",
                                  "--repo", repository,
                                  "--base", base_branch, "--head", data["branch"],
                                  "--title", title,
                                  "--body-file", str(body),
-                                 *(["--label", "needs-manual-verification"] if manual_verification else [])],
+                                 *attachments],
                                 cwd=config["repo"], capture_output=True, text=True)
-        if result.returncode:
-            raise RuntimeError("draft creation failed; inspect before retrying: " + result.stderr.strip())
         url = result.stdout.strip()
         if not re.fullmatch(r"https://[^\s]+/pull/[0-9]+", url):
-            raise RuntimeError("draft creation returned no pull request address; inspect before retrying")
+            raise RuntimeError("pull request creation returned no address; inspect before retrying. "
+                               + redact(result.stderr.strip()))
         append_event(path, dict(event="pr", at=time.time(), url=url, commit=commit,
-                                branch=data["branch"], remote=remote, manual_verification=manual_verification))
+                                branch=data["branch"], remote=remote, manual_verification=manual_verification,
+                                **({"publish_warning": redact(result.stderr.strip())} if result.returncode else {})))
+        if result.returncode:
+            raise RuntimeError(f"opened {url} with a publishing error: " + redact(result.stderr.strip()))
         return url

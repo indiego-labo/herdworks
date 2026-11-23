@@ -49,7 +49,7 @@ Journeys:
   exactly one task, ending verified. No new inbox entry is allocated for a redelivery.
 - draft-pr: use a local bare remote and planted/fake-gh.sh, grant push and draft-pr, send
   shout.md through the real coordinator. Require the remote branch at the verified SHA, one
-  pr create --draft with all four body sections and verifier commands/output, DONE with its
+  ready-for-review pr create with the four core body sections and verifier commands/output, DONE with its
   address, and tasks for review. Inspect fake-gh.jsonl, pr-body.md, remote.json and timing.json.
 - no-grant: same local remote and stand-in, with both grants off. Require no remote refs, no
   fake-gh call, verified status, and DONE naming both missing grants and the verified commit.
@@ -75,6 +75,8 @@ compresses captured elapsed time and does not claim real-time playback. Retain i
 and timestamps; its final frame must be after the gate passes. Save screenshots of tasks and QUESTION. For FP-2 render draft-pr/tasks.txt and draft-pr/pr-body.md
 to review/tasks.png and review/pr-body.png, and inspect them. The real-repository journey and video
 belong to the driver; this helper never touches a real GitHub remote or invokes real gh for FP-2.
+For a GIF preview, inspect the decoded display at the before and after states against the
+saved interaction. Frame counts and hashes alone do not show that the interaction is visible.
 
 ## Cleanup
 The helper ends/removes only sessions with this Project's labels and cleans its worker worktrees.
