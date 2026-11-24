@@ -1,0 +1,18 @@
+{
+  "id": "LV-1",
+  "project": "live",
+  "repo": "/private/tmp/hw8.dtI5j1fX/repo",
+  "base": "98300634da538168dfee64c9011e7b85ab6eaaf6",
+  "base_branch": "main",
+  "branch": "hw/LV-1",
+  "created_at": 1795480934.218911,
+  "message": 1,
+  "memory_before": {},
+  "impact": {
+    "level": "red",
+    "reason": "Needs Architect",
+    "reproduction": "unreproduced",
+    "confidence": "high",
+    "corrected": true
+  }
+}

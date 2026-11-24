@@ -1,0 +1,11 @@
+{
+  "name": "live",
+  "repo": "/private/tmp/hw8.CJQ13k6x/repo",
+  "base_branch": "main",
+  "prefix": "LV",
+  "remote": "origin",
+  "grants": {
+    "push": false,
+    "draft-pr": false
+  }
+}

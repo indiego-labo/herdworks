@@ -1,0 +1,2 @@
+{"number": 1, "text": "Investigate the password-manager report and required migration", "at": 1795478518.8281898, "impact": {"level": "yellow", "reason": "Requires a production migration", "reproduction": "unreproduced", "confidence": "low"}}
+{"number": 2, "text": "Legacy request without assessment", "at": 1795478521.3555079}

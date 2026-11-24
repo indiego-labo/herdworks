@@ -1,0 +1,4 @@
+fixture ready
+fixture received prompt for /private/tmp/hw8.dtI5j1fX/home/projects/live/tasks/LV-2/build-1/brief.md
+hw: operation must be performed by the owner outside Herdworks sessions
+hw: owner correction is in effect; ask the owner to update it
