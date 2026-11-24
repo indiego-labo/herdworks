@@ -23,13 +23,13 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(len(actual), len(expected))
         return sum(abs(a - b) for a, b in zip(actual, expected))
 
-    def test_gif_conversion_displays_the_final_gate_screen(self):
+    def test_motion_displays_both_gate_states_when_output_adds_a_line(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             before = root / 'before.txt'
             before.write_text('$ hw tasks unit\nHE-1 waiting for review\n')
             after = root / 'after.txt'
-            after.write_text('$ hw gate unit HE-1\nVERIFIED 1234567\n')
+            after.write_text('$ hw tasks unit\nHE-1 verified\nVERIFIED 1234567\n')
             manifest = root / 'screens.json'
             manifest.write_text(json.dumps([
                 {'at': 1, 'path': before.name}, {'at': 1.15, 'path': after.name},
@@ -40,15 +40,23 @@ class RenderTests(unittest.TestCase):
                                   stdout=subprocess.DEVNULL)
             self.ffmpeg('-i', video, '-vf', 'fps=2,scale=960:-1', gif)
 
-            # Compare actual display pixels to rendered captures. The codec and palette can
-            # change colors, so each state must be closer to its own capture than the other.
-            references = []
-            for text in (before, after):
+            # Pad the reference separately. The manifest deliberately has unequal line counts.
+            padded_before = root / 'padded-before.txt'
+            padded_before.write_text(before.read_text() + '\n')
+            screens = []
+            for text in (padded_before, after):
                 screen = text.with_suffix('.png')
                 subprocess.check_call([sys.executable, RENDER, text, screen], stdout=subprocess.DEVNULL)
-                references.append(self.pixels('-i', screen, '-vf', 'scale=1600:-2,scale=960:-1'))
-            frames = self.ffmpeg('-i', gif, '-pix_fmt', 'gray', '-f', 'rawvideo', '-')
-            frame_size = len(references[0])
-            first, last = frames[:frame_size], frames[-frame_size:]
-            self.assertLess(self.distance(first, references[0]), self.distance(first, references[1]))
-            self.assertLess(self.distance(last, references[1]), self.distance(last, references[0]))
+                screens.append(screen)
+
+            # Encoding can change colors. Each decoded state should match its own capture better.
+            for media, filters in ((video, 'scale=1600:-2'), (gif, 'scale=1600:-2,scale=960:-1')):
+                with self.subTest(media=media.suffix):
+                    before_pixels, after_pixels = [
+                        self.pixels('-i', screen, '-vf', filters) for screen in screens
+                    ]
+                    frames = self.ffmpeg('-i', media, '-pix_fmt', 'gray', '-f', 'rawvideo', '-')
+                    frame_size = len(before_pixels)
+                    first, last = frames[:frame_size], frames[-frame_size:]
+                    self.assertLess(self.distance(first, before_pixels), self.distance(first, after_pixels))
+                    self.assertLess(self.distance(last, after_pixels), self.distance(last, before_pixels))
