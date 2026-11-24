@@ -66,7 +66,7 @@ you ──hw say──► coordinator ──► builder      writes the change i
   is never the one that wrote it.
 - **Gate.** A plain script that decides whether a task counts as verified. No agent can
   mark its own work as done.
-- **Pull request.** With Project grants, Herdworks opens a ready-for-review PR with inline visual evidence when available. You decide when to merge.
+- **Pull request.** With Project grants, Herdworks opens a ready-for-review PR with inline visual evidence when available. Long command logs stay in Project evidence, with excerpts in the PR. You decide when to merge.
   When a check needs something the machine does not have (a phone simulator, a paid
   account), the title says `[Needs manual verification]` and the body lists the blocked checks.
 

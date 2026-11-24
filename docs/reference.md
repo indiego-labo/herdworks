@@ -59,6 +59,13 @@ SHA-256 hashes and any missing visual proof in `visuals.json` next to `review.md
 shows selected media inline and labels stand-ins. Commands, check results and limitations
 remain in the body, including for tasks where visuals do not apply.
 
+To stay within GitHub's 65,536-character limit, Herdworks shows commands in their recorded
+order. It includes up to 600 characters per command and up to 400 characters from the first
+three lines of output. The command section uses at most 8,000 UTF-8 bytes and can use less
+when the rest of the body needs more room. The body says when this section contains only
+excerpts and gives the path to the full command logs in Project evidence. Herdworks stops
+before pushing if the required body sections exceed the available space.
+
 On GitHub.com and GitHub Enterprise Cloud, `gh` with `pr create --attach` support (v2.99.0
 or newer) uploads screenshots and playable videos directly to the repository's PR. On older
 clients or other hosts, Herdworks stores images and animated GIFs in the same repository under

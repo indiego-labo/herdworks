@@ -75,8 +75,12 @@ compresses captured elapsed time and does not claim real-time playback. Retain i
 and timestamps; its final frame must be after the gate passes. Save screenshots of tasks and QUESTION. For FP-2 render draft-pr/tasks.txt and draft-pr/pr-body.md
 to review/tasks.png and review/pr-body.png, and inspect them. The real-repository journey and video
 belong to the driver; this helper never touches a real GitHub remote or invokes real gh for FP-2.
-For a GIF preview, inspect the decoded display at the before and after states against the
-saved interaction. Frame counts and hashes alone do not show that the interaction is visible.
+For terminal motion fixtures, render timed text captures together with `render.py`. The
+renderer gives every capture the same canvas. An FFmpeg input sequence of separately
+rendered PNGs can change height when output adds a line, resetting the filters and dropping
+a state. To prove motion publication, match the tested file to the attachment receipt or
+recover the published blob. Inspect the decoded before and after states of that exact MP4
+or GIF against the captures. Frame counts and hashes alone do not show the interaction.
 
 ## Cleanup
 The helper ends/removes only sessions with this Project's labels and cleans its worker worktrees.

@@ -1,7 +1,7 @@
 # Herdworks (hw)
 
 Give a coding task to a Project the way you would message a teammate. A coordinator plans it,
-one agent builds it, a different agent checks it works, and you get a ready-for-review pull request. Reviewed screenshots and motion evidence appear in the PR body when available.
+one agent builds it, a different agent checks it works, and you get a ready-for-review pull request. Reviewed screenshots and motion evidence appear in the PR body when available. Full command logs stay in Project evidence when the PR shows excerpts.
 
 ## Everyday commands
 

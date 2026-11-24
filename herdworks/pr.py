@@ -11,6 +11,14 @@ from .projects import read_project
 from .runs import append_event, events, first_line, git, is_stopped, locked, newest_artifact, read_task
 
 
+BODY_LIMIT = 65_536
+ATTACHMENT_URL_HEADROOM = 512  # gh rewrites staged filenames to uploaded URLs.
+COMMAND_EVIDENCE_LIMIT = 8_000
+COMMAND_LIMIT = 600
+OUTPUT_LIMIT = 400
+COMMAND_EXCERPT_NOTICE = "This pull request includes only excerpts. Full command logs remain in Project evidence.\n\n"
+
+
 def recorded_pr(path):
     return next((e for e in reversed(events(path)) if e.get("event") == "pr"), None)
 
@@ -23,15 +31,29 @@ def fenced(text):
 
 def redact(text):
     text = re.sub(r"(https?://)[^/\s@]+@", r"\1[REDACTED]@", text)
-    text = re.sub(r"(?i)([\w-]*(?:api[_-]?key|token|secret|password)[\w-]*\s*[:=]\s*)"
+    # Check for a sensitive name once per word, even in very long command lines.
+    text = re.sub(r"(?i)(?<![\w-])((?=[\w-]*(?:api[_-]?key|token|secret|password))[\w-]+\s*[:=]\s*)"
                   r"(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)", r"\1[REDACTED]", text)
     return re.sub(r"(?i)(bearer\s+)\S+", r"\1[REDACTED]", text)
 
 
-def excerpt(text):
-    lines = redact(text).strip().splitlines()
-    short = "\n".join(lines[:3])[:400]
-    return short + ("\n[Full output retained in Project evidence.]" if short != "\n".join(lines) else "")
+def command_evidence(records, budget):
+    remaining = min(budget, COMMAND_EVIDENCE_LIMIT) - len(COMMAND_EXCERPT_NOTICE)
+    blocks = []
+    excerpted = False
+    for record in records:
+        command = redact(record["command"])
+        output = redact(record["output"]).strip().splitlines()
+        output_head = "\n".join(output[:3])
+        block = fenced(f"$ {command[:COMMAND_LIMIT]}\n{output_head[:OUTPUT_LIMIT]}") + "\n\n"
+        size = len(block.encode("utf-8"))
+        if size > remaining:
+            excerpted = True
+            break
+        blocks.append(block)
+        remaining -= size
+        excerpted |= len(command) > COMMAND_LIMIT or len(output) > 3 or len(output_head) > OUTPUT_LIMIT
+    return (COMMAND_EXCERPT_NOTICE if excerpted else "") + "".join(blocks)
 
 
 def repository_identity(address):
@@ -51,7 +73,7 @@ def repository_identity(address):
     return "/".join((parsed.hostname, *parts))
 
 
-def build_body(path, commit, manual_verification=False, visuals=""):
+def build_body(path, commit, manual_verification=False, visuals="", *, attachment_count=0):
     data = read_task(path)
     base_branch = data.get('base_branch') or read_project(path.parents[1])['base_branch']
     verdict = newest_artifact(path, "verify-*/verdict.md")
@@ -71,8 +93,6 @@ def build_body(path, commit, manual_verification=False, visuals=""):
              "Claims: " + ", ".join(f"{c['id']} {c['grade']}" for c in read_claims(verdict.parent) or []),
              f"Evidence review: {first_line(review)}",
              f"Project evidence: {verdict}, {review}, {commands}"]
-    for record in records:
-        proof.append(fenced(f"$ {redact(record['command'])}\n{excerpt(record['output'])}"))
     why = " ".join((path / 'brief.md').read_text().strip().split("\n\n", 1)[0].split())[:600]
     handoff = ('## Needs manual verification\n\n' +
                '\n'.join(f'- {item}' for item in blocked_requirements(path)) + '\n\n') if manual_verification else ''
@@ -80,15 +100,24 @@ def build_body(path, commit, manual_verification=False, visuals=""):
                if manual_verification else
                'The independent verifier checked this commit; the evidence reviewer confirmed its proof.')
     scope = 'built commit' if manual_verification else 'verified commit'
-    return redact(f"## Why\n\n{why}\n\n"
-                  f"## Scope\n\nTask {data['id']}, branch {data['branch']}, based on {base_branch} "
-                  f"at {data['base']}. "
-                  f"Covers the original request and its {scope}.\n\n"
-                  f"{visuals}"
-                  f"## Blast Radius\n\nChanged files:\n\n{fenced(changed)}\n\n"
-                  f"{summary}\n\n"
-                  "## Verification\n\n" + "\n\n".join(proof) + "\n\n" + handoff +
-                  "Agents must not merge this pull request.\n")
+    heading = redact(
+        f"## Why\n\n{why}\n\n"
+        f"## Scope\n\nTask {data['id']}, branch {data['branch']}, based on {base_branch} "
+        f"at {data['base']}. "
+        f"Covers the original request and its {scope}.\n\n"
+        f"{visuals}"
+        f"## Blast Radius\n\nChanged files:\n\n{fenced(changed)}\n\n"
+        f"{summary}\n\n"
+        "## Verification\n\n" + "\n\n".join(proof) + "\n\n"
+    )
+    ending = redact(handoff + "Agents must not merge this pull request.\n")
+    # Counting UTF-8 bytes also keeps multibyte text within the character limit.
+    budget = BODY_LIMIT - 1 - attachment_count * ATTACHMENT_URL_HEADROOM
+    budget -= len(heading.encode("utf-8")) + len(ending.encode("utf-8"))
+    if budget < len(COMMAND_EXCERPT_NOTICE):
+        raise ValueError("pull request body exceeds the size available for required evidence; "
+                         "shorten the evidence summary or media captions and keep full details in Project evidence")
+    return heading + command_evidence(records, budget) + ending
 
 
 def open_pr(path, manual_verification=False, title=None):
@@ -137,7 +166,8 @@ def open_pr(path, manual_verification=False, title=None):
                                          capture_output=True, text=True)
             native = help_result.returncode == 0 and "--attach" in help_result.stdout
         visuals, attachments, evidence_ref = visual_section(config["repo"], assets, unavailable, native)
-        body.write_text(build_body(path, commit, manual_verification, visuals))
+        body.write_text(build_body(path, commit, manual_verification, visuals,
+                                   attachment_count=len(attachments) // 2), encoding="utf-8")
         if attachments:
             request_body = Path(staging) / body.name
             request_body.write_bytes(body.read_bytes())
