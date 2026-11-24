@@ -9,10 +9,18 @@ WORKER_FOLDER = re.compile(r'(build|verify)-[1-9][0-9]*')
 FINISHED = ('verified', 'for review', 'needs manual verification', 'stopped')
 
 
+def has_hidden_tracked_paths(wt):
+    # ls-files -v marks skip-worktree with S and assume-unchanged with lowercase.
+    entries = git(wt, 'ls-files', '-v', '-z').split('\0')
+    return any(entry[0] == 'S' or entry[0].islower() for entry in entries if entry)
+
+
 def remove_worktree(repo, wt):
     wt = Path(wt)
     if wt.is_symlink() or wt.parent.is_symlink():
         raise ValueError(f'refusing symlinked worktree: {wt}')
+    if has_hidden_tracked_paths(wt):
+        raise ValueError(f'clear assume-unchanged and skip-worktree flags before removing this worktree: {wt}')
     if git(wt, 'ls-files', '--others', '--ignored', '--exclude-standard', '--directory'):
         raise ValueError(f'move ignored files out of the worktree before removing it: {wt}')
     if git(wt, 'status', '--porcelain'):
@@ -30,6 +38,9 @@ def registered_worktrees(repo):
 
 
 def pristine(wt, generated_dirs=()):
+    # Both status and non-force worktree removal can miss these tracked edits.
+    if has_hidden_tracked_paths(wt):
+        return False
     # NUL records keep filenames with whitespace or newlines unambiguous.
     status = git(wt, 'status', '--porcelain=v1', '-z', '--untracked-files=normal',
                  '--ignored=matching', '--ignore-submodules=none')

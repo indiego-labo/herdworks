@@ -64,9 +64,10 @@ df -h "$HOME"
 Automatic cleanup checks the recorded worker and Git registration. It keeps live sessions'
 checkouts, including idle sessions and those with no attached client. It also keeps checkouts
 with unfinished steps, Git locks, local changes, untracked files, or a verifier HEAD that
-differs from the assigned commit. Ignored files keep a checkout in place unless the Project
-owner has explicitly allowed their directory to be removed. Tidy closes a task with a merged
-or closed pull request once its worker checkouts are gone.
+differs from the assigned commit. It keeps checkouts with assume-unchanged or skip-worktree
+index flags because Git status can miss edits to those files. Ignored files keep a checkout
+in place unless the Project owner has explicitly allowed their directory to be removed.
+Tidy closes a task with a merged or closed pull request once its worker checkouts are gone.
 
 For a Node Project, the owner can add `"generated_worktree_dirs": ["node_modules", ".next"]`
 to its existing `project.json` in the Herdworks home. List only top-level directories whose
@@ -81,7 +82,8 @@ captures, and evidence media. A fix gets a fresh worktree on the task branch. A 
 gets a detached checkout at the recorded build commit. A replacement of an unfinished worker
 follows the existing replacement rules. Explicit stop, close and builder replacement can save
 ordinary uncommitted changes as `unsaved.patch` beside the checkout. Apply it with `git apply`.
-Move any ignored files you want to keep before asking Herdworks to remove that checkout.
+Clear assume-unchanged and skip-worktree flags before requesting removal so Git can see
+local edits. Move any ignored files you want to keep before requesting removal.
 
 Reclamation releases the checkout's exclusive allocation. Hard-linked package files can
 occupy less exclusive space than their apparent size. Git objects, verification evidence,

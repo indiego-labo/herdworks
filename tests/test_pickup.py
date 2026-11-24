@@ -1,6 +1,6 @@
 import json
 from unittest.mock import patch
-from herdworks.pickup import stop, tidy
+from herdworks.pickup import remove_worktree, stop, tidy
 from herdworks.runs import append_event, derive_status, git
 from tests.support import RunCase
 
@@ -89,6 +89,27 @@ class ReclaimTests(RunCase):
         self.assertFalse(worktrees['finished'].exists())
         self.assertTrue((worktrees['finished'].parent / 'verdict.md').is_file())
         self.assertTrue(all(worktrees[name].exists() for name in names[1:]))
+
+    def test_cleanup_retains_files_with_index_flags_that_hide_local_edits(self):
+        cases = (('--assume-unchanged',), ('--skip-worktree',),
+                 ('--skip-worktree', '--assume-unchanged'))
+        edits = b'local edit\r\n'
+        for n, flags in enumerate(cases, 1):
+            with self.subTest(flags=flags):
+                wt = self.checkout(f'verify-{n}')
+                (wt.parent / 'verdict.md').write_text('PASS\n')
+                for flag in flags:
+                    git(wt, 'update-index', flag, 'hello.py')
+                (wt / 'hello.py').write_bytes(edits)
+                self.assertEqual(git(wt, 'status', '--porcelain'), '')
+                index_entry = git(wt, 'ls-files', '-v', 'hello.py')
+                with patch('herdworks.hc.get', return_value=dict(state='missing')):
+                    self.assertEqual(tidy(self.project), [])
+                with self.assertRaisesRegex(ValueError, 'clear assume-unchanged and skip-worktree'):
+                    remove_worktree(self.repo, wt)
+                self.assertIn(str(wt), git(self.repo, 'worktree', 'list', '--porcelain'))
+                self.assertEqual((wt / 'hello.py').read_bytes(), edits)
+                self.assertEqual(git(wt, 'ls-files', '-v', 'hello.py'), index_entry)
 
     def test_tidy_does_not_force_removal_when_a_pull_request_ended(self):
         wt = self.checkout('verify-1')
