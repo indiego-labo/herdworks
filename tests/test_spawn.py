@@ -155,6 +155,19 @@ class SpawnTests(RunCase):
         self.assertEqual(events(self.path)[-1]["address"], "t2")
         self.assertFalse(list(self.path.glob(".setup-*.json")))
 
+    @patch("herdworks.hc.launch", side_effect=RuntimeError("reply lost"))
+    def test_retry_preserves_changes_when_uncertain_worker_disappeared(self, launch):
+        with self.assertRaisesRegex(RuntimeError, "uncertain"):
+            spawn(self.path, root=self.root)
+        draft = self.path / "build-1/wt/draft.txt"
+        draft.write_text("unfinished\n")
+        with patch("herdworks.hc.get", return_value={"state": "missing"}):
+            with self.assertRaisesRegex(ValueError, "uncertain launch left work"):
+                spawn(self.path, root=self.root)
+        self.assertEqual(draft.read_text(), "unfinished\n")
+        self.assertTrue((self.path / ".setup-build-1.json").is_file())
+        launch.assert_called_once()
+
     @patch("herdworks.hc.launch")
     def test_branch_changed_during_rollback_is_not_deleted(self, launch):
         def fail_after_branch_moves(repo, *args, **kwargs):

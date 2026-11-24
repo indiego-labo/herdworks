@@ -74,6 +74,10 @@ Agents run in [herdr core](https://github.com/herdrdev/herdr-core) terminals, so
 working when you close the window. Watch one live with `hc attach NAME` (`hw status`
 prints the names).
 
+The coordinator's regular check-in reclaims eligible worktrees after workers exit.
+Project startup and `hw tidy PROJECT` recover missed cleanup. Task branches, evidence
+and checkouts with local changes stay in place. See [Disk space](docs/server.md#disk-space).
+
 `hw help` is the short guide; `hw help TOPIC` covers models, house rules, servers and more.
 
 ## Use it from Claude
