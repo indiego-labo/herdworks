@@ -139,14 +139,18 @@ class HostTests(RunCase):
     def test_tidy_closes_merged_and_closed_pull_requests_only(self):
         from herdworks.runs import events
         builder = self.worktree('build-1', 'hw/HE-1')
+        git(builder, 'commit', '--allow-empty', '-m', 'test: build')
+        commit = git(builder, 'rev-parse', 'HEAD')
+        (builder.parent / 'report.md').write_text(f'READY {commit}\n')
+        append_event(self.path, dict(event='session', role='build', folder='build-1', address='owned'))
         append_event(self.path, dict(event='pr', url='https://github.com/o/r/pull/1', commit='x'))
         second, _ = new_task(self.project, self.brief)
         append_event(second, dict(event='pr', url='https://github.com/o/r/pull/2', commit='y'))
         states = {'https://github.com/o/r/pull/1': 'MERGED', 'https://github.com/o/r/pull/2': 'OPEN'}
         with patch('herdworks.pickup.pr_state', side_effect=lambda project, url: states[url]), \
-                patch('herdworks.hc.get', return_value=dict(state='finished')):
+                patch('herdworks.hc.get', return_value=dict(state='missing')):
             self.assertEqual(tidy(self.project),
-                             ['HE-1 closed: pull request merged, removed 1 worktrees'])
+                             ['HE-1 reclaimed 1 worktrees', 'HE-1 closed: pull request merged'])
             self.assertEqual(tidy(self.project), [])
         self.assertFalse(builder.exists())
         self.assertEqual(events(self.path)[-1]['reason'], 'pull request merged')
@@ -162,6 +166,8 @@ class HostTests(RunCase):
 
     def test_tidy_clears_worktrees_left_by_an_older_stop(self):
         builder = self.worktree('build-1', 'hw/HE-1')
+        append_event(self.path, dict(event='session', role='build', folder='build-1', address='owned'))
         append_event(self.path, dict(event='stop'))
-        self.assertEqual(tidy(self.project), ['HE-1 stopped: removed 1 worktrees'])
+        with patch('herdworks.hc.get', return_value=dict(state='missing')):
+            self.assertEqual(tidy(self.project), ['HE-1 reclaimed 1 worktrees'])
         self.assertFalse(builder.exists())

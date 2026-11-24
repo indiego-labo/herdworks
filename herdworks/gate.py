@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from . import hc
 from .limits import project_setting
-from .pickup import remove_worktree
+from .pickup import reclaim_worktrees, save_screen
 from .runs import append_event, built_commit, events, first_line, git, locked, newest_artifact, read_task, artifact_complete
 
 GRADES = ("PROVED", "DISPROVED", "NOT_PROVED")
@@ -218,26 +218,21 @@ def gate(path):
 def reap(path):
     reaped = []
     with locked(path):
-        data = read_task(path)
         history = events(path)
         for event in history:
             role = event.get("role")
             if event.get("event") != "session" or role == "coordinator":
                 continue
             folder = path / event["folder"]
-            artifact = {"build": "report.md", "verify": "verdict.md", "evidence": "review.md"}[role]
             if not artifact_complete(folder, role):
                 continue
             session = hc.get(event["address"])
-            if session.get("state") in ("live", "finished") and not (folder / "last-screen.txt").exists():
-                screen = hc.call("read", "--json", event["address"])
-                (folder / "last-screen.txt").write_text(screen["text"])
+            if session.get("state") in ("live", "finished"):
+                save_screen(folder, event["address"])
             if session.get("state") == "live":
                 hc.call("kill", event["address"])
-            wt = folder / "wt"
-            if role == "verify" and wt.exists():
-                remove_worktree(data["repo"], wt)
             if not any(e.get("event") == "reaped" and e.get("name") == event["name"] for e in history):
                 append_event(path, {"event": "reaped", "name": event["name"], "at": time.time()})
             reaped.append(event["name"])
+        reclaim_worktrees(path)
     return reaped

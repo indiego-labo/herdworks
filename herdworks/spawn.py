@@ -8,7 +8,7 @@ from . import hc
 from .gate import claim_problems, environment_only
 from .limits import role_settings, hold_reason
 from .memory import brief as memory_brief
-from .pickup import remove_worktree
+from .pickup import pristine, registered_worktrees, remove_worktree
 from .probe import progress_time
 from . import rules
 from .runs import ROOT, append_event, built_commit, events, first_line, git, locked, newest_artifact, read_task, coordinator_task, task_key, is_stopped, coordinator, ARTIFACT, artifact_complete, escalation
@@ -183,6 +183,15 @@ def reconcile(path):
             marker.unlink()
             recovered.append(setup["name"])
         else:
+            if setup.get("launching") and setup["role"] != "evidence":
+                # The launch reply can be lost after the worker ran. Only roll
+                # back a checkout that still matches the launch snapshot.
+                wt = path / setup["folder"] / setup["cwd_name"]
+                entry = registered_worktrees(read_task(path)["repo"]).get(str(wt))
+                if (wt.is_symlink() or (wt.exists() and (
+                        wt.resolve() != wt or not entry or 'locked' in entry
+                        or entry.get("HEAD") != setup["metadata"]["commit"] or not pristine(wt)))):
+                    raise ValueError(f"uncertain launch left work at {wt}; inspect before retrying")
             rollback_setup(path, marker, setup)
     return recovered
 

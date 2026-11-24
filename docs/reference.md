@@ -56,6 +56,7 @@ hw spawn hello HE-1 build
 hw probe hello HE-1
 hw gate hello HE-1
 hw reap hello HE-1
+hw tidy hello
 hw stop hello HE-1
 ```
 
@@ -116,6 +117,10 @@ Project memory and machine limits are stored outside the repository in Herdworks
 The defaults are two active tasks, four live workers, six worker worktrees, 5 GiB free disk,
 and twelve sessions over a task's lifetime. A Project may lower `max_tasks_at_once` in its
 `project.json`. A held task remains queued and `tasks PROJECT` names the limiting setting.
+
+A Project's `project.json` can set `generated_worktree_dirs` to a list of top-level directory
+names such as `["node_modules", ".next"]`. This opts those directories' Git-ignored contents
+into automatic worktree cleanup. See [Disk space](server.md#disk-space).
 
 Use `hw memory read PROJECT` and `hw memory add PROJECT --task TASK_ID --title TITLE
 --text TEXT`. Memory entries are at most 16 KiB. Builders may also write small Markdown files

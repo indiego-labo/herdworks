@@ -48,13 +48,12 @@ worktrees and require 5 GB of free disk. See [reference.md](reference.md) for ev
 
 ## Disk space
 
-Worktrees are removed as tasks go, so they do not pile up:
-
-- A fix round or a replacement removes the previous builder's worktree.
-- `reap` removes a verifier's worktree once its verdict is written.
-- `stop` removes all of a task's worktrees.
-- `tidy` closes tasks whose pull request was merged or closed. The coordinator runs it at the
-  start of every message; you can run it too:
+After reading a worker's result, the coordinator runs `hw reap`. This ends the completed
+sessions and removes clean builder checkouts with matching READY reports and clean verifier
+checkouts with verdicts. A Project startup or pickup checks again for ended workers the
+coordinator missed. `hw tidy` makes the same local check, including leftover checkouts from
+stopped and closed tasks. The coordinator runs tidy on a new message. You can run it while the
+coordinator is down:
 
 ```sh
 hw tidy myapp
@@ -62,10 +61,32 @@ hw task close myapp MY-1
 df -h "$HOME"
 ```
 
-Uncommitted files in a removed worktree are kept as `unsaved.patch` in the worker's folder;
-apply one with `git apply`. Branches, memory, messages, briefs, reports and evidence are
-always kept. Evidence folders and opencode's own caches can still grow; check them now and
-then.
+Automatic cleanup checks the recorded worker and Git registration. It keeps live sessions'
+checkouts, including idle sessions and those with no attached client. It also keeps checkouts
+with unfinished steps, Git locks, local changes, untracked files, or a verifier HEAD that
+differs from the assigned commit. Ignored files keep a checkout in place unless the Project
+owner has explicitly allowed their directory to be removed. Tidy closes a task with a merged
+or closed pull request once its worker checkouts are gone.
+
+For a Node Project, the owner can add `"generated_worktree_dirs": ["node_modules", ".next"]`
+to its existing `project.json` in the Herdworks home. List only top-level directories whose
+entire ignored contents can be regenerated. A listed name must be a real directory at the
+root of the checkout. The repository's Git ignore rules must already cover the generated files.
+Ignored state elsewhere, such as `.env.local` or local data, still keeps the checkout in place.
+With no setting, all ignored state keeps the checkout in place. Reinstall dependencies and
+regenerate caches as needed in a fresh continuation checkout.
+
+The task branch and the records beside each checkout stay in place, including reports, terminal
+captures, and evidence media. A fix gets a fresh worktree on the task branch. A later verifier
+gets a detached checkout at the recorded build commit. A replacement of an unfinished worker
+follows the existing replacement rules. Explicit stop, close and builder replacement can save
+ordinary uncommitted changes as `unsaved.patch` beside the checkout. Apply it with `git apply`.
+Move any ignored files you want to keep before asking Herdworks to remove that checkout.
+
+Reclamation releases the checkout's exclusive allocation. Hard-linked package files can
+occupy less exclusive space than their apparent size. Git objects, verification evidence,
+package-manager caches and agent caches outside the checkout, and unrelated repositories in
+temporary directories stay in place.
 
 ## Updating
 
@@ -77,3 +98,8 @@ curl -fsSL https://raw.githubusercontent.com/indiego-labo/herdworks/main/install
 
 From a clone on your laptop, `scripts/ship-to-host.sh myserver [REF]` installs a pushed ref on
 a server added with `hc machine add`.
+
+For an existing Project on agent-dev, install a published ref containing the cleanup on that
+host. Use the existing Project and its current coordinator. As the owner, add
+`generated_worktree_dirs` to that Project's `project.json` if it has disposable directories.
+Run `hw tidy PROJECT` on the host to sweep finished checkouts already on disk.

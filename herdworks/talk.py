@@ -1,8 +1,10 @@
 import json
 import shlex
+import sys
 import time
 from . import hc
 from .limits import role_settings
+from .pickup import reclaim_worktrees
 from .projects import read_project, task_paths
 from .runs import ROOT, locked
 from .spawn import reconcile, write_journal
@@ -39,7 +41,11 @@ def _up(project, root):
         hc.call("rm", observed["address"])
     for item in task_paths(project):
         with locked(item.parent):
-            reconcile(item.parent)
+            try:
+                reconcile(item.parent)
+                reclaim_worktrees(item.parent)
+            except (OSError, RuntimeError, ValueError) as error:
+                print(f"hw: {item.parent.name} not tidied: {error}", file=sys.stderr)
     data = read_project(project)
     settings = role_settings(project, "coordinator")
     home = project.parents[1]

@@ -146,7 +146,7 @@ class GateTests(GateCase):
     @patch('herdworks.hc.get')
     def test_reap_preserves_proof_and_removes_only_verifier_worktree(self, get, call):
         git(self.repo, 'worktree', 'add', '--detach', self.verify / 'wt', self.sha)
-        get.return_value = {'state': 'live'}
+        get.side_effect = [{'state': 'live'}] * 3 + [{'state': 'finished'}]
         call.return_value = {'text': 'last screen'}
         self.assertEqual(len(reap(self.path)), 3)
         self.assertFalse((self.verify / 'wt').exists())
@@ -155,6 +155,7 @@ class GateTests(GateCase):
         self.assertTrue(check_gate(self.path)[0])
         self.assertEqual([c.args for c in call.call_args_list if c.args[0] == 'kill'],
                          [('kill', 't2'), ('kill', 't3'), ('kill', 't4')])
+        get.side_effect = None
         get.return_value = {'state': 'finished'}
         call.reset_mock()
         reap(self.path)
@@ -162,7 +163,7 @@ class GateTests(GateCase):
 
     @patch('herdworks.hc.call', return_value={'text': 'screen'})
     @patch('herdworks.hc.get', return_value={'state': 'finished'})
-    def test_reap_removes_verifier_worktree_without_evidence_and_keeps_its_files(self, get, call):
+    def test_reap_retains_dirty_verifier_worktree(self, get, call):
         import shutil
         shutil.rmtree(self.verify / 'evidence')
         self.verdict.write_text(f'INCONCLUSIVE\nCommit: {self.sha}\nBLOCKED-BY-ENVIRONMENT: no device\n')
@@ -170,8 +171,8 @@ class GateTests(GateCase):
         git(self.repo, 'worktree', 'add', '--detach', wt, self.sha)
         (wt / 'notes.txt').write_text('left in the worktree')
         reap(self.path)
-        self.assertFalse(wt.exists())
-        self.assertIn('left in the worktree', (self.verify / 'unsaved.patch').read_text())
+        self.assertTrue(wt.exists())
+        self.assertEqual((wt / 'notes.txt').read_text(), 'left in the worktree')
 
     @patch('herdworks.hc.call', return_value={'text': 'plain program exited'})
     @patch('herdworks.hc.get', return_value={'state': 'finished'})

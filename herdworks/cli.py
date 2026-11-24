@@ -170,7 +170,7 @@ def main(argv=None):
     command.add_argument("--timeout", type=float, help="seconds to wait; exit 2 if nothing arrives")
     command = sub.add_parser("tasks")
     command.add_argument("project")
-    command = sub.add_parser("tidy", help="close tasks whose pull request was merged or closed, and clear stopped tasks' worktrees")
+    command = sub.add_parser("tidy", help="reclaim finished workers' clean worktrees and close tasks with ended pull requests")
     command.add_argument("project")
     command = sub.add_parser("task")
     actions = command.add_subparsers(dest="action", required=True)
