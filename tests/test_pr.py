@@ -155,6 +155,7 @@ class PRTests(GateCase):
                          ['## Why', '## Scope', '## Blast Radius', '## Verification'])
         for required in ('ORIGINAL REQUEST', 'PASS', self.sha, 'python3 hello.py Ada', 'Hello, Ada!', 'CONFIRMED'):
             self.assertIn(required, body)
+        self.assertNotIn('only excerpts', body)
         self.assertEqual(events(self.path)[-1]['url'], url)
         self.assertEqual(derive_status(self.path), 'for review')
         with patch('herdworks.hc.sessions', return_value=[]), patch('herdworks.hc.get', return_value={'state': 'missing'}):
@@ -182,6 +183,60 @@ class PRTests(GateCase):
                         'VERDICT DETAIL SHOULD STAY LOCAL'):
             self.assertNotIn(private, body)
         self.assertLess(len(body), 3000)
+        self.assertIn('only excerpts', body)
+
+    def test_long_command_evidence_keeps_selected_media_and_concise_proof(self):
+        self.select_visuals(('result.png', b'screenshot bytes', 'CLI fixture', 'stand-in'))
+        records = json.dumps([
+            dict(command='python3 hello.py Ada', output='Hello, Ada!\n'),
+            dict(command='check oversized invocation ' + 'x' * 70_000 + ' OMITTED ARGUMENT',
+                 output='All checks passed\n' + 'trace line\n' * 100),
+            *(dict(command=f'check fixture {i}', output='é' * 1_000) for i in range(200)),
+        ])
+        self.commands.write_text(records)
+        open_pr(self.path)
+        call = json.loads(self.log.read_text())
+        body = call['body']
+        self.assertFalse(call['isDraft'])
+        self.assertLess(len(body.encode('utf-8')), 10_000)
+        for required in ('## Scope', 'Stand-in: CLI fixture](../blob/', 'Verdict: PASS',
+                         'Evidence review: CONFIRMED', 'Hello, Ada!', 'All checks passed', 'only excerpts'):
+            self.assertIn(required, body)
+        self.assertNotIn('OMITTED ARGUMENT', body)
+        self.assertNotIn('check fixture 199', body)
+        self.assertEqual(self.commands.read_text(), records)
+
+    def test_long_manual_pr_reserves_space_for_native_media_and_full_limitations(self):
+        self.environment_verdict()
+        (self.root / 'fake-gh-attachments').touch()
+        self.select_visuals(('result.png', b'screenshot bytes', 'CLI fixture', 'stand-in'))
+        limitation = 'Inspect the device display. ' + 'x' * 60_000 + ' End of limitation.'
+        (self.review / 'review.md').write_text(
+            f'INCONCLUSIVE\nBLOCKED-BY-ENVIRONMENT: {limitation}\nPASSED-OTHER-CHECKS: CLI output inspected\n')
+        self.commands.write_text(json.dumps([
+            dict(command='python3 hello.py Ada', output='Hello, Ada!'),
+            *(dict(command='check fixture ' + 'λ' * 600, output='fixture trace ' * 100) for _ in range(100)),
+        ]))
+        with patch('herdworks.pr.repository_identity', return_value='github.com/fixture/hello'):
+            open_pr(self.path, manual_verification=True)
+        call = json.loads(self.log.read_text())
+        body = call['body']
+        self.assertFalse(call['isDraft'])
+        self.assertLess(len(body.encode('utf-8')), 65_536)
+        for required in (limitation, 'Verify on the target device; no device or emulator is available',
+                         '## Needs manual verification', 'Verdict: INCONCLUSIVE', 'only excerpts', 'Hello, Ada!',
+                         '![Stand-in: CLI fixture](https://github.invalid/user-attachments/assets/visual-1.png)'):
+            self.assertIn(required, body)
+        self.assertEqual(derive_status(self.path), 'needs manual verification')
+
+    def test_oversized_required_body_refuses_before_push_or_creation(self):
+        self.environment_verdict()
+        (self.review / 'review.md').write_text(
+            'INCONCLUSIVE\nBLOCKED-BY-ENVIRONMENT: ' + 'x' * 65_536 + '\nPASSED-OTHER-CHECKS: CLI inspected\n')
+        with self.assertRaisesRegex(ValueError, 'exceeds the size available for required evidence'):
+            open_pr(self.path, manual_verification=True)
+        self.assert_no_external_effect()
+        self.assertFalse(any(event['event'] == 'pr-started' for event in events(self.path)))
 
     def test_https_credentials_are_absent_from_gh_arguments(self):
         def configured_url(repo, *args, **kwargs):
