@@ -1,0 +1,10 @@
+{"argv": ["/private/tmp/hw8.CJQ13k6x/candidate/bin/hw", "tidy", "live"], "exit": 0, "stdout": "", "stderr": ""}
+{"argv": ["/private/tmp/hw8.CJQ13k6x/candidate/bin/hw", "task", "new", "live", "--message", "1"], "exit": 0, "stdout": "LV-1\n", "stderr": ""}
+{"argv": ["/private/tmp/hw8.CJQ13k6x/candidate/bin/hw", "task", "correct-impact", "live", "LV-1", "green", "--reason", "Session must be denied"], "exit": 1, "stdout": "", "stderr": "hw: operation must be performed by the owner outside Herdworks sessions\n"}
+{"argv": ["/private/tmp/hw8.CJQ13k6x/candidate/bin/hw", "tidy", "live"], "exit": 0, "stdout": "", "stderr": ""}
+{"argv": ["/private/tmp/hw8.CJQ13k6x/candidate/bin/hw", "task", "new", "live", "--message", "1"], "exit": 0, "stdout": "LV-1 repeat\n", "stderr": ""}
+{"argv": ["/private/tmp/hw8.CJQ13k6x/candidate/bin/hw", "task", "impact", "live", "LV-1", "green", "--reason", "Must preserve correction"], "exit": 1, "stdout": "", "stderr": "hw: owner correction is in effect; ask the owner to update it\n"}
+{"argv": ["/private/tmp/hw8.CJQ13k6x/candidate/bin/hw", "tidy", "live"], "exit": 0, "stdout": "", "stderr": ""}
+{"argv": ["/private/tmp/hw8.CJQ13k6x/candidate/bin/hw", "task", "new", "live", "--message", "2"], "exit": 0, "stdout": "LV-2\n", "stderr": ""}
+{"argv": ["/private/tmp/hw8.CJQ13k6x/candidate/bin/hw", "spawn", "live", "LV-2", "build"], "exit": 1, "stdout": "", "stderr": "hw: first message was not sent to hw-live-lv-2-build-1; inspect hc read hw-live-lv-2-build-1\n"}
+{"argv": ["/private/tmp/hw8.CJQ13k6x/candidate/bin/hw", "probe", "live", "LV-2"], "exit": 0, "stdout": "hw-live-lv-2-build-1 role=build launch=template status=None turn=0 quiet=1.0m stuck-after=60m\n", "stderr": ""}

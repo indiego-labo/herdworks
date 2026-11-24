@@ -1,0 +1,17 @@
+{
+  "id": "LV-1",
+  "project": "live",
+  "repo": "/private/tmp/hw8.CJQ13k6x/repo",
+  "base": "45aecff1c6f29144ed937bb0b2e2481aae0d25c5",
+  "base_branch": "main",
+  "branch": "hw/LV-1",
+  "created_at": 1795478519.973205,
+  "message": 1,
+  "memory_before": {},
+  "impact": {
+    "level": "yellow",
+    "reason": "Requires a production migration",
+    "reproduction": "unreproduced",
+    "confidence": "low"
+  }
+}

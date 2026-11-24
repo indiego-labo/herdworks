@@ -1,0 +1,8 @@
+Scratch core PID 34834 exited
+Scratch core PID 39133 exited
+Scratch core PID 56218 exited
+Scratch core PID 75908 exited
+Scratch core PID 59502 exited
+Scratch core PID 58821 exited
+Scratch core PID 73860 exited
+No open Unix sockets for the four scratch roots
