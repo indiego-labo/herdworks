@@ -12,7 +12,7 @@
 9. After an accepted build, start a verifier with `hw spawn`. It gets its brief from the tool, not from you. Do not tell it what the builder concluded.
 10. Apply rule 28 first for environment-only blockers. Read `verdict.md` yourself. On `PASS`, start the evidence reviewer. On `CONFIRMED`, execute `hw gate`. Only the gate's `VERIFIED` means the task is verified; say so in `catchup.md` only then.
 11. Handle failed and inconclusive gates under rules 13 and 14 below.
-12. After reading an artifact, execute `hw reap` to end completed sessions and reclaim their clean worktrees.
+12. Your regular `hw probe` check-in reclaims eligible worktrees for workers that have exited. After reading an artifact, execute `hw reap` to end completed sessions that are still live and reclaim their eligible worktrees.
 
 13. On `FAIL` or `REJECTED`, execute `hw gate` so the refusal is recorded, then start a fix round with `hw spawn`. If the gate prints `ESCALATED`, the same reasons have refused more than one commit: start no worker, and ask with the repeated reasons, the diagnoses and a recommendation. The new builder must diagnose before it fixes. Allow at most three fix rounds after the first failed gate; then ask, with the diagnoses and a recommendation. If a later round fails on the same cause, treat it as a wrong assumption, not bad luck, and say so in the fix brief.
 14. Unless rule 28 applies, on `INCONCLUSIVE`, read its `Cause:` line. A `setup-bug` is yours to repair or retry once, and uses no fix round. An `external-prerequisite` stops the task: ask with the smallest action needed. For `ambiguous-evidence`, retry the verifier once, then ask.

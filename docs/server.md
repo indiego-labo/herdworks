@@ -48,12 +48,13 @@ worktrees and require 5 GB of free disk. See [reference.md](reference.md) for ev
 
 ## Disk space
 
-After reading a worker's result, the coordinator runs `hw reap`. This ends the completed
-sessions and removes clean builder checkouts with matching READY reports and clean verifier
-checkouts with verdicts. A Project startup or pickup checks again for ended workers the
-coordinator missed. `hw tidy` makes the same local check, including leftover checkouts from
-stopped and closed tasks. The coordinator runs tidy on a new message. You can run it while the
-coordinator is down:
+At each check-in, the coordinator runs `hw probe`. It reclaims clean builder checkouts
+with matching READY reports and clean verifier checkouts with verdicts once the worker
+process has ended. After reading a worker's result, the coordinator can use `hw reap` to
+capture the screen and end a session that is still live with a completed artifact.
+Project startup and `hw tidy` recover missed cleanup, including leftover checkouts from
+stopped and closed tasks. The coordinator runs tidy on a new message. You can run it
+while the coordinator is down:
 
 ```sh
 hw tidy myapp

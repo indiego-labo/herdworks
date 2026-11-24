@@ -1,5 +1,8 @@
 import json
+from contextlib import redirect_stdout
+from io import StringIO
 from unittest.mock import patch
+from herdworks.cli import main
 from herdworks.pickup import remove_worktree, stop, tidy
 from herdworks.runs import append_event, derive_status, git
 from tests.support import RunCase
@@ -25,8 +28,31 @@ class ReclaimTests(RunCase):
         git(self.repo, 'worktree', 'add', '--detach', wt, sha)
         if record:
             append_event(self.path, dict(event='session', role='verify', folder=name,
-                                         address=name, commit=sha))
+                                         address=name, name=name, commit=sha, started_at=0,
+                                         stuck_after_minutes=10))
         return wt
+
+    def test_probe_reclaims_ended_worktree_without_ending_live_worker(self):
+        ended = self.checkout('verify-1')
+        live = self.checkout('verify-2')
+        for wt in (ended, live):
+            (wt.parent / 'verdict.md').write_text('PASS\n')
+
+        def get(address):
+            if address == 'verify-1':
+                return dict(state='finished', status=None, reason='exited', exit_code=0)
+            return dict(state='live', status='idle')
+
+        with patch('herdworks.hc.get', side_effect=get), \
+                patch('herdworks.hc.call', return_value={'text': 'completed screen'}) as call, \
+                redirect_stdout(StringIO()) as output:
+            for _ in range(2):
+                self.assertEqual(main(['probe', 'unit', 'HE-1']), 0)
+            call.assert_called_once_with('read', '--json', 'verify-1')
+        self.assertIn('PASS', output.getvalue())
+        self.assertEqual((ended.parent / 'last-screen.txt').read_text(), 'completed screen')
+        self.assertFalse(ended.exists())
+        self.assertTrue(live.is_dir())
 
     def test_generated_dirs_are_opt_in_and_only_allow_ignored_directory_contents(self):
         names = ('generated', 'private', 'untracked', 'similar', 'symlink', 'file', 'changed')

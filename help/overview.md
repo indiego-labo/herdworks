@@ -8,7 +8,8 @@ one agent builds it, a different agent checks it works, and you get a draft pull
     hw say PROJECT "what you want. Done when ..."   give a task, or answer a question
     hw read PROJECT                                  the coordinator's replies
     hw wait PROJECT                                  wait for the next reply, then print it
-    hw tidy PROJECT                                  reclaim finished workers' clean worktrees
+    hw probe PROJECT TASK_ID                         check workers and reclaim eligible ended worktrees
+    hw tidy PROJECT                                  recover missed worktree cleanup across a Project
     hw tasks PROJECT                                 every task and its status
     hw status                                        what is running now
     hc attach NAME                                   watch an agent live (names from hw status)

@@ -12,7 +12,7 @@ from .runs import ROOT, derive_status, escalation, locked, read_task, first_line
 from .projects import add_project, add_github_project, project_path, task_path, task_paths, new_task, read_project
 from .talk import up, say, read, latest, wait
 from .spawn import spawn
-from .pickup import stop, close, tidy
+from .pickup import stop, close, reclaim_worktrees, tidy
 from .pr import open_pr, recorded_pr
 from .projects import grant_project
 from .limits import config, hold_reason
@@ -325,6 +325,11 @@ def main(argv=None):
                 stop(path)
                 print(f"stopped {args.task_id}")
             elif args.command == "probe":
+                with locked(path):
+                    try:
+                        reclaim_worktrees(path)
+                    except (OSError, RuntimeError, ValueError) as error:
+                        print(f"hw: {path.name} not tidied: {error}", file=sys.stderr)
                 for fact in probe(path):
                     print(format_fact(fact))
             elif args.command == "gate":
