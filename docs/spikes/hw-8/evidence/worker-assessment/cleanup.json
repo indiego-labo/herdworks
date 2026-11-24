@@ -1,0 +1,13 @@
+{
+  "baseline": [],
+  "after": [],
+  "owned": [
+    "t1",
+    "t2"
+  ],
+  "errors": [],
+  "foreign_preserved": true,
+  "foreign_missing": [],
+  "foreign_untouched": true,
+  "owned_remaining": []
+}

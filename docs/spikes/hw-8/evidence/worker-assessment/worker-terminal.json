@@ -1,0 +1,65 @@
+{
+  "address": "t2",
+  "argv": [
+    "sh",
+    "-c",
+    "/private/tmp/hw8.dtI5j1fX/candidate/bin/hw-codex worker"
+  ],
+  "cols": 200,
+  "created_ms": 1795480945738,
+  "cwd": "/private/tmp/hw8.dtI5j1fX/home/projects/live/tasks/LV-2/build-1/wt",
+  "die_with_parent": true,
+  "exit_code": null,
+  "finished_ms": null,
+  "foreground": {
+    "argv": [
+      "/opt/homebrew/Cellar/python@3.11/3.11.15/Frameworks/Python.framework/Versions/3.11/Resources/Python.app/Contents/MacOS/Python",
+      "/private/tmp/hw8.dtI5j1fX/shim/codex",
+      "--no-daemon",
+      "-c",
+      "check_for_update_on_startup=false",
+      "-c",
+      "sandbox_workspace_write.exclude_slash_tmp=true",
+      "-c",
+      "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+      "-c",
+      "projects={\"/private/tmp/hw8.dtI5j1fX/repo\"={trust_level=\"trusted\"}}",
+      "--approve-for-me",
+      "--add-dir",
+      "/private/tmp/hw8.dtI5j1fX/home/projects/live/tasks/LV-2/build-1",
+      "--add-dir",
+      "/private/tmp/hw8.dtI5j1fX/home/projects/live/memory",
+      "-m",
+      "gpt-6.1-sol",
+      "-c",
+      "model_reasoning_effort=low"
+    ],
+    "cwd": "/private/tmp/hw8.dtI5j1fX/home/projects/live/tasks/LV-2/build-1/wt",
+    "name": "Python",
+    "pid": 85281
+  },
+  "identity": "ghostty",
+  "keep": false,
+  "labels": {
+    "hw": "live:LV-2",
+    "role": "build"
+  },
+  "name": "hw-live-lv-2-build-1",
+  "notify": true,
+  "parent": "t1",
+  "pid": 85281,
+  "reason": null,
+  "reported": true,
+  "rm": false,
+  "rows": 120,
+  "screen": "exact",
+  "signal": null,
+  "state": "live",
+  "status": {
+    "state": "idle"
+  },
+  "status_ms": 1795480946316,
+  "template": "hw-builder",
+  "title": "",
+  "turn": 0
+}

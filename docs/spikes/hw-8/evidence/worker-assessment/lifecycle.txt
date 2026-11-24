@@ -1,0 +1,7 @@
+Scratch root /private/tmp/hw8.dtI5j1fX
+python3 journey.py exit 0
+python3 -m unittest discover -s tests -v exit 0
+{"hidden_finished":0,"terminals":[]}
+{"stopped":true}
+hc server stop exit 0
+Scratch core socket absent after stop

@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import time
 
@@ -97,23 +98,64 @@ def check_legacy():
         if time.monotonic() >= deadline:
             raise RuntimeError('no recorded worker launch')
         time.sleep(.15)
-    observed = json.loads(run('hc', 'get', '--json', launch['address']))
-    if observed.get('first_message', {}).get('sent') is False:
+    assert launch['role'] == 'build' and launch['launch_source'] == 'template'
+    if not launch['first_message']['sent']:
         brief = task / 'build-1/brief.md'
         run('hc', 'send', launch['address'], f'Read {brief} in full and do what it says.')
     wait_file(evidence / 'worker-probe.jsonl')
     assert json.loads((evidence / 'worker-probe.jsonl').read_text())['exit'] == 0
-    assert launch['role'] == 'build' and launch['launch_source'] == 'template'
-    run('hc', 'get', '--json', launch['address'])
-    run('hc', 'read', '--json', launch['address'])
     run(hw, 'probe', 'live', 'LV-2')
+    return launch
+
+
+def check_worker_assessment(launch, coordinator):
+    address = launch['address']
+    detail = json.loads(run('hc', 'get', '--json', address))
+    journey.save(evidence / 'worker-terminal.json', detail)
+    assert detail['state'] == 'live' and detail['template'] == 'hw-builder', detail
+    assert address != coordinator and detail['parent'] == coordinator, detail
+    assert detail['labels'] == {'hw': 'live:LV-2', 'role': 'build'}, detail
+    started = json.loads((evidence / 'worker-process.jsonl').read_text())
+    assert started['terminal'] == detail['address'] == address, (started, detail)
+    assert started['cwd'] == detail['cwd'] == str(project / 'tasks/LV-2/build-1/wt')
+    assert '--approve-for-me' in started['argv'], started
+    run('ps', '-p', str(started['pid']), '-o', 'pid=,ppid=,comm=')
+
+    task = project / 'tasks/LV-1/task.json'
+    before = task.read_bytes()
+    assert json.loads(before)['impact'] == dict(level='red', reason='Needs Architect',
+                                               reproduction='unreproduced', confidence='high', corrected=True)
+    (evidence / 'assessment-before.json').write_bytes(before)
+    denials = (
+        ('correct-impact', 'operation must be performed by the owner outside Herdworks sessions'),
+        ('impact', 'owner correction is in effect; ask the owner to update it'),
+    )
+    for verb, denial in denials:
+        stimulus = f'CHECK WORKER {verb}'
+        run('hc', 'send', '--json', address, stimulus)
+        trace = evidence / f'worker-{verb}.jsonl'
+        wait_file(trace)
+        result = json.loads(trace.read_text())
+        assert result['argv'] == [str(hw), 'task', verb, 'live', 'LV-1', 'green',
+                                  '--reason', f'Build worker attempted {verb}'], result
+        assert result['stimulus'] == stimulus, result
+        for key in ('terminal', 'pid', 'cwd'):
+            assert result[key] == started[key], result
+        assert result['hop'] is None and result['forwarded_caller'] is None, result
+        assert result['exit'] == 1 and result['stderr'].strip() == f'hw: {denial}', result
+        after = task.read_bytes()
+        (evidence / f'assessment-after-{verb}.json').write_bytes(after)
+        assert after == before, verb
+        print(f'{address} {verb}: refused (exit 1), corrected task unchanged', flush=True)
+    capture = json.loads(run('hc', 'read', '--json', address))
+    (evidence / 'worker-terminal.txt').write_text(capture['text'])
 
 
 def main():
     run('git', 'rev-parse', 'HEAD')
     run('git', 'status', '--porcelain')
     run('hc', '--version')
-    run('codex', '--version')
+    assert Path(shutil.which('codex')).resolve() == scratch / 'terminal-fixture.py'
     run('uname', '-srm')
     run('python3', '--version')
     run('git', '--version')
@@ -134,7 +176,8 @@ def main():
         try:
             run('hc', 'wait', address['address'], '--output', 'fixture ready', '--timeout', '10', '--json')
             check_intake(address['address'])
-            check_legacy()
+            launch = check_legacy()
+            check_worker_assessment(launch, address['address'])
         finally:
             run('hc', 'ls', '--all', '--json')
     finally:
@@ -142,7 +185,10 @@ def main():
             journey.collect(project, evidence)
         finally:
             journey.cleanup(project, evidence, baseline)
-        run('git', '-C', fixture, 'worktree', 'list', '--porcelain')
+        cleanup = json.loads((evidence / 'cleanup.json').read_text())
+        assert not cleanup['after'] and not cleanup['errors'] and cleanup['foreign_untouched'], cleanup
+        worktrees = run('git', '-C', fixture, 'worktree', 'list', '--porcelain')
+        assert [line for line in worktrees.splitlines() if line.startswith('worktree ')] == [f'worktree {fixture}']
     run('git', 'status', '--porcelain')
 
 

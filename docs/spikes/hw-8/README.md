@@ -10,6 +10,36 @@ covers the essential Bot-to-Project delivery and owner correction with a determi
 coordinator. Model-backed worker startup and prompt handling remain open. These findings
 add no condition to ready-for-review publication or the opt-in merge follow-up.
 
+## Worker assessment follow-up
+
+The second independent evidence review found that the Linux AC-6 trace attributed the
+coordinator's commands to the worker. In `verify-2/evidence/linux/` the coordinator
+`t6` issued both commands. The distinct `hw-builder` child `t7` logged startup and
+prompt receipt. Its trace contained zero assessment commands. The Linux worker-specific
+result is **NOT_PROVED** in that run.
+
+The focused builder proof exercised the pinned HW-6 candidate on an owner-capable
+Mac with herdr 0.1.21. SSH reached agent-dev, and automatic approval review rejected
+the repository bundle and script transfer, so the focused Linux rerun remains open.
+The [owner-shell runner](run-owner.sh) ran the portable launch and CLI path in an
+isolated scratch Project. The owner shell first recorded a red correction on LV-1.
+That task retained its original unreproduced status and acquired high confidence.
+The real LV-2 build template and Codex adapter launched a deterministic PTY fixture
+in terminal `t2`, a child of coordinator `t1`. The launch event records
+`first_message.sent: true` and the fixture read the generated brief.
+
+| Check | Grade | Command and observed result |
+| --- | --- | --- |
+| Worker cannot make an owner correction | PROVED in the macOS fixture run | `hw task correct-impact live LV-1 green --reason 'Build worker attempted correct-impact'` exited 1 in `t2` with `operation must be performed by the owner outside Herdworks sessions`. [Command record](evidence/worker-assessment/worker-correct-impact.jsonl) |
+| Worker cannot replace the correction with a proposal | PROVED in the macOS fixture run | `hw task impact live LV-1 green --reason 'Build worker attempted impact'` exited 1 in `t2` with `owner correction is in effect; ask the owner to update it`. [Command record](evidence/worker-assessment/worker-impact.jsonl) |
+| Corrected state and disposable scope | PROVED in the macOS fixture run | The [driver](journey.py) matched both command records to the same terminal, fixture PID and worktree. It compared the full task file after each attempt to the owner-corrected snapshot. The bytes matched. The scratch terminal list was empty after cleanup and Git listed only the base fixture. The owned core stopped and its temporary root was removed. [Terminal identity and task snapshots](evidence/worker-assessment/) |
+
+The worker accepted two fixed inputs via `hc send --json t2` after the owner's
+correction. Its subprocesses inherited its terminal identity. The command records
+show empty hop and forwarded-caller variables. The fixture exercises normal CLI
+authorization from a labelled build terminal. Model-backed startup, model-backed
+prompt handling and the independent macOS confinement grades remain open.
+
 ## Independent Linux follow-up
 
 The Project retains the raw artifacts under HW-8's `verify-1/evidence/`.
@@ -63,7 +93,10 @@ In the original builder run, the SSH connectivity probe identified agent-dev as 
 
 ## Reproduce the owner-shell proof
 
-From this repository, use an owner-capable shell with Git, herdr, Python 3.11+ and Codex on PATH. The runner reads a bundle and the two proof scripts from stdin and writes a tar of the evidence to stdout. Its scratch core uses a unique session, empty XDG paths and a fresh Herdworks and Codex home. The core’s `codex` resolves to the fixture. The real Codex executable is queried only for its version.
+From this repository, use an owner-capable shell with Git, herdr and Python 3.11+
+on PATH. The runner reads a bundle and the two proof scripts from stdin and writes
+a tar of the evidence to stdout. Its scratch core uses a unique session, empty XDG
+paths and a fresh Herdworks and Codex home. Its `codex` resolves to the fixture.
 
 ```sh
 code="$PWD/docs/spikes/hw-8"

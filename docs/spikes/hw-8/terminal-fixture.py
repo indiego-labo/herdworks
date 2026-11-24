@@ -44,25 +44,51 @@ def receive():
     return data.decode().removeprefix('\x1b[200~').removesuffix('\r').removesuffix('\n').removesuffix('\x1b[201~').replace('\r\n', '\n').replace('\r', '\n')
 
 
+def worker_identity():
+    return dict(pid=os.getpid(), cwd=str(Path.cwd()), terminal=os.environ.get('HC_TERMINAL_ID'),
+                hop=os.environ.get('HW_HC_HOP'), forwarded_caller=os.environ.get('HW_CALLER_TERMINAL'))
+
+
+def run_worker(*args):
+    argv = [str(hw), *args]
+    result = subprocess.run(argv, text=True, capture_output=True, timeout=25)
+    print((result.stdout + result.stderr).replace('\n', '\r\n'), end='', flush=True)
+    return dict(argv=argv, exit=result.returncode, stdout=result.stdout, stderr=result.stderr,
+                **worker_identity())
+
+
+def worker_checks():
+    record('worker-process.jsonl', argv=sys.argv, **worker_identity())
+    prompt = receive()
+    record('worker-input.jsonl', text=prompt, **worker_identity())
+    brief_path = Path('../brief.md').resolve()
+    assert 'Legacy request without assessment' in brief_path.read_text()
+    assert f'Read {brief_path} in full' in prompt
+    print(f'fixture received prompt for {brief_path}\r', flush=True)
+    record('worker-probe.jsonl', **run_worker('probe', 'live', 'LV-2'))
+
+    for verb in ('correct-impact', 'impact'):
+        stimulus = receive()
+        record('worker-input.jsonl', text=stimulus, **worker_identity())
+        assert stimulus == f'CHECK WORKER {verb}', stimulus
+        record(f'worker-{verb}.jsonl', stimulus=stimulus,
+               **run_worker('task', verb, 'live', 'LV-1', 'green',
+                            '--reason', f'Build worker attempted {verb}'))
+    # Stay live while the driver captures identity and terminal text.
+    receive()
+
+
 def main():
     worker = Path(sys.argv[0]).name == 'codex'
     tty.setraw(0)
-    # Advertise bracketed paste and leave a visible prompt for herdr's startup guard.
-    print('\x1b[?2004hfixture ready\r', flush=True)
+    # Advertise bracketed paste and report idle for the automatic first-message guard.
+    print('\x1b[?2004h\x1b]7501;state=idle\x07fixture ready\r', flush=True)
     if worker:
-        record('worker-process.jsonl', pid=os.getpid(), cwd=str(Path.cwd()),
-               terminal=os.environ.get('HC_TERMINAL_ID'), argv=sys.argv)
+        worker_checks()
+        return
     for sequence in range(1, 4):
         received = receive()
         print(f'fixture received: {received}'.replace('\n', '\r\n') + '\r', flush=True)
-        if worker:
-            record('worker-input.jsonl', text=received)
-            brief = Path('../brief.md').read_text()
-            assert 'Legacy request without assessment' in brief
-            expected_path = Path('../brief.md').resolve()
-            assert f'Read {expected_path} in full' in received
-            assert run_worker_probe(brief)
-            return
         number, request = re.fullmatch(r'MESSAGE ([0-9]+)\n(.+)', received).groups()
         record('pty-delivery.jsonl', number=int(number), request=request,
                terminal=os.environ.get('HC_TERMINAL_ID'))
@@ -92,13 +118,6 @@ def main():
             assert result.returncode == 0 or 'first message was not sent' in result.stderr, result.stderr
             # Keep the worker's real parent available through evidence capture.
             receive()
-
-
-def run_worker_probe(brief):
-    result = run('probe', 'live', 'LV-2')
-    record('worker-probe.jsonl', brief=brief, exit=result.returncode,
-           stdout=result.stdout, stderr=result.stderr)
-    return result.returncode == 0
 
 
 if __name__ == '__main__':

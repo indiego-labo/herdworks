@@ -5,11 +5,11 @@ exec 3>&1
 exec >&2
 scratch=$(mktemp -d /tmp/hw8.XXXXXXXX)
 scratch=$(cd "$scratch" && pwd -P)
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
 export HC_SESSION="hw8-${scratch##*.}"
 export XDG_CONFIG_HOME="$scratch/config" XDG_STATE_HOME="$scratch/state" XDG_RUNTIME_DIR="$scratch/run"
 export HW_HOME="$scratch/home" CODEX_HOME="$scratch/codex"
-unset HC_TERMINAL_ID HW_CALLER_TERMINAL HW_HC_HOP
+unset HC_TERMINAL_ID HC_TERMINAL_SOCKET HC_SCOPE HW_CALLER_TERMINAL HW_HC_HOP
 mkdir -m 700 "$XDG_CONFIG_HOME" "$XDG_STATE_HOME" "$XDG_RUNTIME_DIR" "$HW_HOME" "$CODEX_HOME" "$scratch/evidence" "$scratch/shim"
 mkdir -m 700 "$scratch/tmp"
 export TMPDIR="$scratch/tmp"
@@ -30,7 +30,8 @@ git clone --quiet --no-checkout "$scratch/candidate.bundle" "$scratch/candidate"
 git -C "$scratch/candidate" checkout --quiet --detach d230e7aafe4f688cd85f6e7811f790e248c9632e
 ln -s "$scratch/terminal-fixture.py" "$scratch/shim/codex"
 cd "$scratch/candidate"
-PATH="$scratch/shim:$PATH" hc server start --json > "$scratch/evidence/core-start.json" 2>&1 || { cat "$scratch/evidence/core-start.json"; exit 1; }
+export PATH="$scratch/shim:$PATH"
+hc server start --json > "$scratch/evidence/core-start.json" 2>&1 || { cat "$scratch/evidence/core-start.json"; exit 1; }
 core_started=1
 set +e
 python3 "$scratch/journey.py" > "$scratch/evidence/journey.log" 2>&1
